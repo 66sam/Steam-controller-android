@@ -15,7 +15,8 @@ import kotlin.system.exitProcess
 /**
  * Runs inside a process started by Shizuku with shell (or root) privileges, where /dev/uhid is
  * accessible. Each virtual device is one open file descriptor on /dev/uhid; the kernel turns it
- * into a regular input device, so Android and games see real hardware.
+ * into a regular input device, so Android and games see real hardware. It also reads other
+ * controllers' raw input through [EvdevHost].
  *
  * Talks to the app through a hand-written Binder protocol (see [UhidProtocol]).
  */
@@ -26,6 +27,10 @@ class UhidService : Binder() {
 
     private val devices = HashMap<Int, Device>()
     @Volatile private var callback: IBinder? = null
+    private val evdev = EvdevHost(
+        onEvents = { id, events -> callback(UhidProtocol.CB_EVDEV) { it.writeInt(id); it.writeIntArray(events) } },
+        onClosed = { id -> callback(UhidProtocol.CB_EVDEV_CLOSED) { it.writeInt(id) } },
+    )
 
     override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
         when (code) {
@@ -57,7 +62,28 @@ class UhidService : Binder() {
                 val report = data.createByteArray() ?: return true
                 input(id, report)
             }
+            UhidProtocol.TX_LIST_EVDEV -> {
+                data.enforceInterface(UhidProtocol.DESCRIPTOR)
+                val text = evdev.list()
+                reply?.writeNoException()
+                reply?.writeString(text)
+            }
+            UhidProtocol.TX_OPEN_EVDEV -> {
+                data.enforceInterface(UhidProtocol.DESCRIPTOR)
+                val id = data.readInt()
+                val path = data.readString() ?: ""
+                val grab = data.readInt() != 0
+                val error = evdev.open(id, path, grab)
+                reply?.writeNoException()
+                reply?.writeString(error)
+            }
+            UhidProtocol.TX_CLOSE_EVDEV -> {
+                data.enforceInterface(UhidProtocol.DESCRIPTOR)
+                evdev.close(data.readInt())
+                reply?.writeNoException()
+            }
             UhidProtocol.TX_SHIZUKU_DESTROY -> {
+                evdev.closeAll()
                 synchronized(devices) { devices.keys.toList() }.forEach { destroy(it) }
                 exitProcess(0)
             }
@@ -156,14 +182,18 @@ class UhidService : Binder() {
         }
     }
 
-    private fun sendOutput(id: Int, report: ByteArray) {
+    private fun sendOutput(id: Int, report: ByteArray) = callback(UhidProtocol.CB_OUTPUT) {
+        it.writeInt(id)
+        it.writeByteArray(report)
+    }
+
+    private fun callback(code: Int, write: (Parcel) -> Unit) {
         val cb = callback ?: return
         val data = Parcel.obtain()
         try {
             data.writeInterfaceToken(UhidProtocol.CALLBACK_DESCRIPTOR)
-            data.writeInt(id)
-            data.writeByteArray(report)
-            cb.transact(UhidProtocol.CB_OUTPUT, data, null, FLAG_ONEWAY)
+            write(data)
+            cb.transact(code, data, null, FLAG_ONEWAY)
         } catch (e: Exception) {
             Log.w(TAG, "callback failed: ${e.message}")
         } finally {
@@ -194,7 +224,12 @@ object UhidProtocol {
     const val TX_CREATE = IBinder.FIRST_CALL_TRANSACTION + 1
     const val TX_DESTROY = IBinder.FIRST_CALL_TRANSACTION + 2
     const val TX_INPUT = IBinder.FIRST_CALL_TRANSACTION + 3
+    const val TX_LIST_EVDEV = IBinder.FIRST_CALL_TRANSACTION + 4
+    const val TX_OPEN_EVDEV = IBinder.FIRST_CALL_TRANSACTION + 5
+    const val TX_CLOSE_EVDEV = IBinder.FIRST_CALL_TRANSACTION + 6
     /** Transaction Shizuku sends to tell a user service to exit. */
     const val TX_SHIZUKU_DESTROY = 16777115
     const val CB_OUTPUT = IBinder.FIRST_CALL_TRANSACTION
+    const val CB_EVDEV = IBinder.FIRST_CALL_TRANSACTION + 1
+    const val CB_EVDEV_CLOSED = IBinder.FIRST_CALL_TRANSACTION + 2
 }

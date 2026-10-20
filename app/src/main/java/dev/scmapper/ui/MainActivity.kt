@@ -115,6 +115,7 @@ class MainActivity : Activity() {
         val key = listOf(
             service != null, service?.devices?.status, service?.devices?.lastError, Shizuku.pingBinder(),
             controllers.joinToString { "${it.id}/${it.slot}/${it.battery}" }, app.settings.bleAddresses,
+            service?.generic?.available?.joinToString { it.key }, app.settings.genericDevices, service?.generic?.lastError,
         ).toString()
         if (key == lastStatusKey) return
         lastStatusKey = key
@@ -122,7 +123,7 @@ class MainActivity : Activity() {
         val f = statusForm
         f.clear()
         f.header("SC Mapper")
-        f.note("Steam Controller (2015) and Steam Controller (2026) → Android gamepad, keyboard and mouse.")
+        f.note("Steam Controller (2015), Steam Controller (2026) and other gamepads → remappable Android gamepad, keyboard and mouse.")
 
         f.subheader("Virtual devices")
         when {
@@ -188,11 +189,46 @@ class MainActivity : Activity() {
                         .setNegativeButton(android.R.string.cancel, null).show()
                 }
             }
+            renderGeneric(f, service)
             f.button("Stop service") {
                 startService(Intent(this, BridgeService::class.java).setAction(BridgeService.ACTION_STOP))
                 handler.postDelayed({ lastStatusKey = "" }, 300)
             }
         }
+    }
+
+    private fun renderGeneric(f: Form, service: BridgeService) {
+        f.subheader("Other controllers")
+        val available = service.generic.available
+        if (available.isEmpty()) {
+            f.note("Any other gamepad connected to this device (Xbox, PlayStation, Switch, 8BitDo, …) shows up here.")
+        }
+        val enabled = app.settings.genericDevices
+        for (d in available) {
+            val on = d.key in enabled
+            f.row(
+                (if (on) "☑ " else "☐ ") + d.name,
+                if (on) "Remapped by SC Mapper · long-press to set up buttons" else "Not used · tap to remap it with SC Mapper",
+                onLongClick = {
+                    startActivity(Intent(this, ControllerSetupActivity::class.java).putExtra(ControllerSetupActivity.EXTRA_KEY, d.key))
+                },
+            ) {
+                if (on) {
+                    service.setGenericEnabled(d.key, false)
+                    lastStatusKey = ""
+                } else {
+                    AlertDialog.Builder(this).setTitle(d.name)
+                        .setMessage(
+                            "SC Mapper will take this controller over: games then see SC Mapper's virtual controller " +
+                                "instead, with your profile applied. Untick it to give it back."
+                        )
+                        .setPositiveButton("Use it") { _, _ -> service.setGenericEnabled(d.key, true); lastStatusKey = "" }
+                        .setNegativeButton(android.R.string.cancel, null).show()
+                }
+            }
+        }
+        service.generic.lastError?.let { f.note("❌ $it") }
+        f.button("Refresh controller list") { service.generic.refresh(); handler.postDelayed({ lastStatusKey = "" }, 800) }
     }
 
     private fun addBluetooth() {

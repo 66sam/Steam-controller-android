@@ -45,6 +45,10 @@
             android:name=".ui.MonitorActivity"
             android:exported="false" />
 
+        <activity
+            android:name=".ui.ControllerSetupActivity"
+            android:exported="false" />
+
         <service
             android:name=".service.BridgeService"
             android:exported="false"

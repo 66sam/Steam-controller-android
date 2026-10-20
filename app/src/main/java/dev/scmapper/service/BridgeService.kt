@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.hardware.input.InputManager
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
@@ -23,6 +24,7 @@ import dev.scmapper.controller.BleControllerManager
 import dev.scmapper.controller.ControllerLink
 import dev.scmapper.controller.ControllerListener
 import dev.scmapper.controller.ControllerModel
+import dev.scmapper.controller.GenericControllerManager
 import dev.scmapper.controller.RawState
 import dev.scmapper.controller.UsbControllerManager
 import dev.scmapper.mapping.GyroMode
@@ -54,6 +56,13 @@ class BridgeService : Service(), ControllerListener {
     lateinit var ble: BleControllerManager
         private set
     private lateinit var menu: OverlayMenu
+    lateinit var generic: GenericControllerManager
+        private set
+    private val inputDeviceListener = object : InputManager.InputDeviceListener {
+        override fun onInputDeviceAdded(deviceId: Int) = generic.refresh()
+        override fun onInputDeviceRemoved(deviceId: Int) = generic.refresh()
+        override fun onInputDeviceChanged(deviceId: Int) {}
+    }
 
     @Volatile private var menuOpen = false
     @Volatile var gyroEnabled = true
@@ -135,7 +144,10 @@ class BridgeService : Service(), ControllerListener {
                 hub.recreateAll()
                 applyProfile()
             }
+            generic.refresh()
         }
+        generic = GenericControllerManager(devices, app.settings, this)
+        (getSystemService(Context.INPUT_SERVICE) as InputManager).registerInputDeviceListener(inputDeviceListener, main)
         devices.start()
 
         menu = OverlayMenu(this, onSelect = { name -> app.profiles.activeName = name }, onClosed = { menuOpen = false })
@@ -170,6 +182,8 @@ class BridgeService : Service(), ControllerListener {
         main.post { if (menu.isShowing) menu.close() }
         usb.stop()
         ble.stop()
+        (getSystemService(Context.INPUT_SERVICE) as InputManager).unregisterInputDeviceListener(inputDeviceListener)
+        generic.stop()
         val done = Object()
         engine.post {
             hub.releaseAll()
@@ -357,6 +371,11 @@ class BridgeService : Service(), ControllerListener {
     fun testHaptics() = engine.post { entries.values.forEach { it.mapper.confirm(3) } }
 
     fun setIdentityFromSettings() = engine.post { hub.setIdentity(app.settings.identity) }
+
+    fun setGenericEnabled(key: String, enabled: Boolean) {
+        app.settings.genericDevices = if (enabled) app.settings.genericDevices + key else app.settings.genericDevices - key
+        generic.refresh()
+    }
 
     fun connectBle(address: String) {
         app.settings.bleAddresses = app.settings.bleAddresses + address

@@ -73,7 +73,7 @@ class ProfileEditorActivity : Activity() {
         f.header("Buttons")
         f.note(
             "Tap a button to set what it does. A long-press action makes a short press tap the normal action instead. " +
-                "Inputs marked 2026 only exist on the Steam Controller (2026)."
+                "Inputs your controller doesn't have are simply ignored."
         )
         for (b in Btn.entries.filter { it.bindable }) {
             val binding = profile.binding(b)
@@ -90,7 +90,7 @@ class ProfileEditorActivity : Activity() {
 
         f.header("Left stick")
         surface(profile.stick, isStick = true)
-        f.header("Right stick (2026)")
+        f.header("Right stick (2026 and other gamepads)")
         surface(profile.rightStick, isStick = true)
         f.header("Left trackpad")
         surface(profile.leftPad, isStick = false)

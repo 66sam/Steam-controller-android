@@ -22,6 +22,9 @@ class VirtualDevices(private val context: Context, private val onOutput: (id: In
     @Volatile var lastError: String? = null
         private set
     var onReady: (() -> Unit)? = null
+    /** Raw input batches (type, code, value triples) from devices opened with [openEvdev]. */
+    var onEvdev: ((id: Int, events: IntArray) -> Unit)? = null
+    var onEvdevClosed: ((id: Int) -> Unit)? = null
 
     @Volatile private var remote: IBinder? = null
     private val created = HashSet<Int>()
@@ -34,11 +37,25 @@ class VirtualDevices(private val context: Context, private val onOutput: (id: In
 
     private val callback = object : Binder() {
         override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
-            if (code != UhidProtocol.CB_OUTPUT) return super.onTransact(code, data, reply, flags)
-            data.enforceInterface(UhidProtocol.CALLBACK_DESCRIPTOR)
-            val id = data.readInt()
-            val report = data.createByteArray() ?: return true
-            onOutput(id, report)
+            when (code) {
+                UhidProtocol.CB_OUTPUT -> {
+                    data.enforceInterface(UhidProtocol.CALLBACK_DESCRIPTOR)
+                    val id = data.readInt()
+                    val report = data.createByteArray() ?: return true
+                    onOutput(id, report)
+                }
+                UhidProtocol.CB_EVDEV -> {
+                    data.enforceInterface(UhidProtocol.CALLBACK_DESCRIPTOR)
+                    val id = data.readInt()
+                    val events = data.createIntArray() ?: return true
+                    onEvdev?.invoke(id, events)
+                }
+                UhidProtocol.CB_EVDEV_CLOSED -> {
+                    data.enforceInterface(UhidProtocol.CALLBACK_DESCRIPTOR)
+                    onEvdevClosed?.invoke(data.readInt())
+                }
+                else -> return super.onTransact(code, data, reply, flags)
+            }
             return true
         }
     }
@@ -163,6 +180,20 @@ class VirtualDevices(private val context: Context, private val onOutput: (id: In
         }
     }
 
+    /** `getevent -i` output from the helper, or null if the helper isn't running. */
+    fun listInputDevices(): String? = call(UhidProtocol.TX_LIST_EVDEV) {}
+
+    /** Starts reading (and optionally grabbing) an input device; returns an error message or null. */
+    fun openEvdev(id: Int, path: String, grab: Boolean): String? {
+        val r = call(UhidProtocol.TX_OPEN_EVDEV) { it.writeInt(id); it.writeString(path); it.writeInt(if (grab) 1 else 0) }
+            ?: return lastError ?: "Helper not running"
+        return r.ifEmpty { null }
+    }
+
+    fun closeEvdev(id: Int) {
+        call(UhidProtocol.TX_CLOSE_EVDEV) { it.writeInt(id) }
+    }
+
     /** Synchronous call; returns the optional string result ("" for none), or null on failure. */
     private fun call(code: Int, write: (Parcel) -> Unit): String? {
         val binder = remote ?: return null
@@ -173,7 +204,7 @@ class VirtualDevices(private val context: Context, private val onOutput: (id: In
             write(data)
             binder.transact(code, data, reply, 0)
             reply.readException()
-            if (code == UhidProtocol.TX_CREATE) reply.readString() ?: "" else ""
+            if (code == UhidProtocol.TX_CREATE || code == UhidProtocol.TX_LIST_EVDEV || code == UhidProtocol.TX_OPEN_EVDEV) reply.readString() ?: "" else ""
         } catch (e: Exception) {
             fail("Helper call failed: ${e.message}")
             null
