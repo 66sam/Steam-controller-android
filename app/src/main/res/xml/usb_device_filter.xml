@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Steam Controller (wired) -->
+    <usb-device vendor-id="10462" product-id="4354" />
+    <!-- Steam Controller wireless receiver (dongle) -->
+    <usb-device vendor-id="10462" product-id="4418" />
+</resources>
