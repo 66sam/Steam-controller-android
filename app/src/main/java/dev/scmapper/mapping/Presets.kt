@@ -2,7 +2,10 @@ package dev.scmapper.mapping
 
 import dev.scmapper.mapping.GamepadOut as G
 
-/** Built-in profiles, modelled on the templates that ship with Steam. */
+/**
+ * Built-in profiles, modelled on the templates that ship with Steam. They cover both the 2015 and
+ * the 2026 controller; inputs a controller doesn't have are simply unused.
+ */
 object Presets {
     fun all(): List<Profile> = listOf(gamepad(), gamepadGyroFps(), keyboardMouse(), fpsKeyboardMouse(), retro())
 
@@ -13,6 +16,13 @@ object Presets {
         deadzone = 0.25f,
         dirActions = mutableListOf(Action.gp(G.DPAD_UP), Action.gp(G.DPAD_DOWN), Action.gp(G.DPAD_LEFT), Action.gp(G.DPAD_RIGHT)),
     )
+
+    private fun Profile.arrowsOnDpad() {
+        binding(Btn.DPAD_UP).press = Action.key(82)
+        binding(Btn.DPAD_DOWN).press = Action.key(81)
+        binding(Btn.DPAD_LEFT).press = Action.key(80)
+        binding(Btn.DPAD_RIGHT).press = Action.key(79)
+    }
 
     private fun Profile.xboxFace() {
         binding(Btn.A).press = Action.gp(G.A)
@@ -25,6 +35,13 @@ object Presets {
         binding(Btn.START).press = Action.gp(G.START)
         binding(Btn.STEAM).press = Action.gp(G.GUIDE)
         binding(Btn.STICK_CLICK).press = Action.gp(G.L3)
+        binding(Btn.RSTICK_CLICK).press = Action.gp(G.R3)
+        binding(Btn.QAM).press = Action.special(Special.PROFILE_MENU)
+        binding(Btn.DPAD_UP).press = Action.gp(G.DPAD_UP)
+        binding(Btn.DPAD_DOWN).press = Action.gp(G.DPAD_DOWN)
+        binding(Btn.DPAD_LEFT).press = Action.gp(G.DPAD_LEFT)
+        binding(Btn.DPAD_RIGHT).press = Action.gp(G.DPAD_RIGHT)
+        rightStick = SurfaceConfig(mode = SurfaceMode.JOYSTICK, target = StickTarget.RIGHT, deadzone = 0.08f)
         leftTrigger = TriggerConfig(analog = TriggerTarget.LEFT)
         rightTrigger = TriggerConfig(analog = TriggerTarget.RIGHT)
     }
@@ -67,6 +84,10 @@ object Presets {
         binding(Btn.LGRIP).press = Action.media(0x0EA) // Volume down
         binding(Btn.RGRIP).press = Action.media(0x0E9) // Volume up
         binding(Btn.STICK_CLICK).press = Action.mouse(MouseOut.MIDDLE)
+        binding(Btn.RSTICK_CLICK).press = Action.mouse(MouseOut.LEFT)
+        binding(Btn.QAM).press = Action.special(Special.PROFILE_MENU)
+        arrowsOnDpad()
+        rightStick = SurfaceConfig(mode = SurfaceMode.MOUSE, deadzone = 0.1f, sensitivity = 1.0f)
         leftTrigger = TriggerConfig(fullAction = Action.mouse(MouseOut.RIGHT))
         rightTrigger = TriggerConfig(fullAction = Action.mouse(MouseOut.LEFT))
         stick = SurfaceConfig(
@@ -91,6 +112,10 @@ object Presets {
         binding(Btn.LGRIP).press = Action.key(225) // Shift: sprint
         binding(Btn.RGRIP).press = Action.key(29) // Z
         binding(Btn.STICK_CLICK).press = Action.key(225)
+        binding(Btn.RSTICK_CLICK).press = Action.key(25) // V: melee
+        binding(Btn.QAM).press = Action.special(Special.PROFILE_MENU)
+        arrowsOnDpad()
+        rightStick = SurfaceConfig(mode = SurfaceMode.MOUSE, deadzone = 0.08f, sensitivity = 1.2f)
         leftTrigger = TriggerConfig(softAction = Action.mouse(MouseOut.RIGHT), softThreshold = 0.3f)
         rightTrigger = TriggerConfig(softAction = Action.mouse(MouseOut.LEFT), softThreshold = 0.3f)
         stick = SurfaceConfig(

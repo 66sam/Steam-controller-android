@@ -1,7 +1,6 @@
 package dev.scmapper
 
 import dev.scmapper.controller.RawState
-import dev.scmapper.controller.SteamProtocol
 import dev.scmapper.mapping.Action
 import dev.scmapper.mapping.Btn
 import dev.scmapper.mapping.GamepadOut
@@ -24,6 +23,7 @@ class MapperTest {
         val specials = ArrayList<Special>()
         var haptics = 0
         override fun haptic(right: Boolean, onUs: Int, offUs: Int, count: Int) { haptics++ }
+        override fun rumble(low: Float, high: Float) {}
         override fun special(s: Special) { specials += s }
         override fun turnOffController() {}
         override fun calibrated() {}
@@ -44,7 +44,7 @@ class MapperTest {
     @Test
     fun gamepadPresetBasics() {
         mapper.profile = Presets.gamepad()
-        s.buttons = SteamProtocol.B_A
+        s.buttons = Btn.A.bit
         step()
         assertTrue(mapper.frame.has(GamepadOut.A))
         s.buttons = 0
@@ -52,13 +52,13 @@ class MapperTest {
         assertFalse(mapper.frame.has(GamepadOut.A))
 
         // Right pad acts as the right stick.
-        s.buttons = SteamProtocol.B_RPAD_TOUCH
+        s.buttons = Btn.RPAD_TOUCH.bit
         s.rpadX = 32767; s.rpadY = 0
         step()
         assertEquals(1f, mapper.frame.rx, 0.01f)
 
         // Left pad click on the top edge is d-pad up.
-        s.buttons = SteamProtocol.B_LPAD_TOUCH or SteamProtocol.B_LPAD_CLICK
+        s.buttons = Btn.LPAD_TOUCH.bit or Btn.LPAD_CLICK.bit
         s.lpadX = 0; s.lpadY = 30000
         step()
         assertTrue(mapper.frame.has(GamepadOut.DPAD_UP))
@@ -73,14 +73,14 @@ class MapperTest {
     @Test
     fun steamChordsSwitchProfilesAndSuppressButton() {
         mapper.profile = Presets.gamepad()
-        s.buttons = SteamProtocol.B_STEAM
+        s.buttons = Btn.STEAM.bit
         step()
-        s.buttons = SteamProtocol.B_STEAM or SteamProtocol.B_RB
+        s.buttons = Btn.STEAM.bit or Btn.RB.bit
         step()
         assertEquals(listOf(Special.NEXT_PROFILE), host.specials)
         assertFalse(mapper.frame.has(GamepadOut.RB))
         // Releasing Steam with RB still held keeps RB suppressed; no Guide tap.
-        s.buttons = SteamProtocol.B_RB
+        s.buttons = Btn.RB.bit
         step()
         assertFalse(mapper.frame.has(GamepadOut.RB))
         assertFalse(mapper.frame.has(GamepadOut.GUIDE))
@@ -89,7 +89,7 @@ class MapperTest {
     @Test
     fun steamTapFiresGuide() {
         mapper.profile = Presets.gamepad()
-        s.buttons = SteamProtocol.B_STEAM
+        s.buttons = Btn.STEAM.bit
         step()
         assertFalse(mapper.frame.has(GamepadOut.GUIDE))
         s.buttons = 0
@@ -105,7 +105,7 @@ class MapperTest {
         p.binding(Btn.LGRIP).press = Action.gp(GamepadOut.A)
         p.binding(Btn.LGRIP).hold = Action.gp(GamepadOut.B)
         mapper.profile = p
-        s.buttons = SteamProtocol.B_LGRIP
+        s.buttons = Btn.LGRIP.bit
         step()
         assertFalse(mapper.frame.has(GamepadOut.A))
         step(500)
@@ -114,7 +114,7 @@ class MapperTest {
         step()
         assertFalse(mapper.frame.has(GamepadOut.A))
         // Short press taps A.
-        s.buttons = SteamProtocol.B_LGRIP
+        s.buttons = Btn.LGRIP.bit
         step()
         s.buttons = 0
         step()
@@ -129,7 +129,7 @@ class MapperTest {
             gridActions[2] = Action.gp(GamepadOut.A); gridActions[3] = Action.gp(GamepadOut.B)
         }
         mapper.profile = p
-        s.buttons = SteamProtocol.B_RPAD_TOUCH
+        s.buttons = Btn.RPAD_TOUCH.bit
         s.rpadX = 20000; s.rpadY = -20000 // bottom right
         step()
         assertTrue(mapper.frame.has(GamepadOut.B))
@@ -142,7 +142,7 @@ class MapperTest {
     @Test
     fun padMouseAndScroll() {
         mapper.profile = Presets.keyboardMouse()
-        s.buttons = SteamProtocol.B_RPAD_TOUCH
+        s.buttons = Btn.RPAD_TOUCH.bit
         s.rpadX = 0; s.rpadY = 0
         step()
         s.rpadX = 3276
@@ -152,7 +152,7 @@ class MapperTest {
 
         // Left pad: circular scrolling clockwise scrolls down.
         mapper.frame.wheel = 0
-        s.buttons = SteamProtocol.B_LPAD_TOUCH
+        s.buttons = Btn.LPAD_TOUCH.bit
         for (deg in 90 downTo -90 step 10) {
             val r = Math.toRadians(deg.toDouble())
             s.lpadX = (Math.cos(r) * 25000).toInt(); s.lpadY = (Math.sin(r) * 25000).toInt()
@@ -166,13 +166,24 @@ class MapperTest {
         val p = Profile("t")
         p.binding(Btn.Y).press = Action.wheel(WheelOut.UP)
         mapper.profile = p
-        s.buttons = SteamProtocol.B_Y
+        s.buttons = Btn.Y.bit
         step()
         assertEquals(1, mapper.frame.wheel)
         step()
         assertEquals(1, mapper.frame.wheel)
         step(400)
         assertEquals(2, mapper.frame.wheel)
+    }
+
+    @Test
+    fun rightStickAndDpadButtons2026() {
+        mapper.profile = Presets.gamepad()
+        s.rstickX = 0; s.rstickY = 32767
+        s.buttons = Btn.DPAD_LEFT.bit or Btn.RSTICK_CLICK.bit
+        step()
+        assertEquals(1f, mapper.frame.ry, 0.02f)
+        assertTrue(mapper.frame.has(GamepadOut.DPAD_LEFT))
+        assertTrue(mapper.frame.has(GamepadOut.R3))
     }
 
     @Test

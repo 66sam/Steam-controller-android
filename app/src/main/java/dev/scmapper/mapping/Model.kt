@@ -1,29 +1,48 @@
 package dev.scmapper.mapping
 
-import dev.scmapper.controller.SteamProtocol
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** Physical buttons. [bindable] ones get a [ButtonBinding]; the rest are handled by pads/triggers. */
-enum class Btn(val bit: Int, val label: String, val bindable: Boolean = true) {
-    A(SteamProtocol.B_A, "A"),
-    B(SteamProtocol.B_B, "B"),
-    X(SteamProtocol.B_X, "X"),
-    Y(SteamProtocol.B_Y, "Y"),
-    LB(SteamProtocol.B_LB, "Left bumper"),
-    RB(SteamProtocol.B_RB, "Right bumper"),
-    BACK(SteamProtocol.B_BACK, "Back (◀)"),
-    START(SteamProtocol.B_START, "Start (▶)"),
-    STEAM(SteamProtocol.B_STEAM, "Steam button (tap)"),
-    LGRIP(SteamProtocol.B_LGRIP, "Left back paddle"),
-    RGRIP(SteamProtocol.B_RGRIP, "Right back paddle"),
-    STICK_CLICK(SteamProtocol.B_STICK_CLICK, "Stick click"),
-    LT_CLICK(SteamProtocol.B_LT, "Left trigger full pull", bindable = false),
-    RT_CLICK(SteamProtocol.B_RT, "Right trigger full pull", bindable = false),
-    LPAD_CLICK(SteamProtocol.B_LPAD_CLICK, "Left pad click", bindable = false),
-    RPAD_CLICK(SteamProtocol.B_RPAD_CLICK, "Right pad click", bindable = false),
-    LPAD_TOUCH(SteamProtocol.B_LPAD_TOUCH, "Left pad touch", bindable = false),
-    RPAD_TOUCH(SteamProtocol.B_RPAD_TOUCH, "Right pad touch", bindable = false),
+/**
+ * Controller-independent inputs. Every controller driver translates its own report into these
+ * bits ([bit]); inputs a controller doesn't have simply never fire. [bindable] inputs get a
+ * [ButtonBinding]; the rest are handled by the pad/stick/trigger configs or used as gyro switches.
+ * Names are stored in profiles, so never rename an entry.
+ */
+enum class Btn(val label: String, val bindable: Boolean = true) {
+    A("A"),
+    B("B"),
+    X("X"),
+    Y("Y"),
+    LB("Left bumper"),
+    RB("Right bumper"),
+    BACK("Back / View (◀)"),
+    START("Start / Menu (▶)"),
+    STEAM("Steam button (tap)"),
+    QAM("Quick access (…) — 2026"),
+    LGRIP("Left back button 1 (2015 left grip)"),
+    RGRIP("Right back button 1 (2015 right grip)"),
+    LGRIP2("Left back button 2 — 2026"),
+    RGRIP2("Right back button 2 — 2026"),
+    STICK_CLICK("Left stick click"),
+    RSTICK_CLICK("Right stick click — 2026"),
+    DPAD_UP("D-pad up — 2026"),
+    DPAD_DOWN("D-pad down — 2026"),
+    DPAD_LEFT("D-pad left — 2026"),
+    DPAD_RIGHT("D-pad right — 2026"),
+    LT_CLICK("Left trigger full pull", bindable = false),
+    RT_CLICK("Right trigger full pull", bindable = false),
+    LPAD_CLICK("Left pad click", bindable = false),
+    RPAD_CLICK("Right pad click", bindable = false),
+    LPAD_TOUCH("Left pad touch", bindable = false),
+    RPAD_TOUCH("Right pad touch", bindable = false),
+    LSTICK_TOUCH("Left stick touch — 2026", bindable = false),
+    RSTICK_TOUCH("Right stick touch — 2026", bindable = false),
+    LGRIP_TOUCH("Left grip touch — 2026", bindable = false),
+    RGRIP_TOUCH("Right grip touch — 2026", bindable = false),
+    ;
+
+    val bit: Int get() = 1 shl ordinal
 }
 
 enum class ActionType { NONE, GAMEPAD, KEY, MOUSE, WHEEL, MEDIA, SPECIAL }
@@ -260,6 +279,8 @@ class Profile(
     var leftTrigger: TriggerConfig = TriggerConfig(),
     var rightTrigger: TriggerConfig = TriggerConfig(),
     var stick: SurfaceConfig = SurfaceConfig(),
+    /** The 2026 controller's right stick. */
+    var rightStick: SurfaceConfig = SurfaceConfig(mode = SurfaceMode.JOYSTICK, target = StickTarget.RIGHT, deadzone = 0.08f),
     var leftPad: SurfaceConfig = SurfaceConfig(),
     var rightPad: SurfaceConfig = SurfaceConfig(),
     var gyro: GyroConfig = GyroConfig(),
@@ -277,7 +298,7 @@ class Profile(
     fun allActions(): List<Action> = buildList {
         buttons.values.forEach { add(it.press); add(it.hold) }
         for (t in listOf(leftTrigger, rightTrigger)) { add(t.softAction); add(t.fullAction) }
-        for (s in listOf(stick, leftPad, rightPad)) {
+        for (s in surfaces()) {
             addAll(s.dirActions); add(s.centerAction); addAll(s.gridActions.take(s.rows * s.cols))
             add(s.clickAction)
             if (s.mode == SurfaceMode.SCROLL) { add(s.scrollCw); add(s.scrollCcw) }
@@ -285,8 +306,10 @@ class Profile(
     }
 
     fun usesMouse() = gyro.mode == GyroMode.MOUSE ||
-        listOf(stick, leftPad, rightPad).any { it.mode == SurfaceMode.MOUSE } ||
+        surfaces().any { it.mode == SurfaceMode.MOUSE } ||
         allActions().any { it.type == ActionType.MOUSE || it.type == ActionType.WHEEL }
+
+    fun surfaces() = listOf(stick, rightStick, leftPad, rightPad)
 
     fun usesKeyboard() = allActions().any { it.type == ActionType.KEY || it.type == ActionType.MEDIA }
 
@@ -295,7 +318,7 @@ class Profile(
         buttons.forEach { (k, v) -> b.put(k.name, v.toJson()) }
         return JSONObject().put("version", 1).put("name", name).put("buttons", b)
             .put("leftTrigger", leftTrigger.toJson()).put("rightTrigger", rightTrigger.toJson())
-            .put("stick", stick.toJson()).put("leftPad", leftPad.toJson()).put("rightPad", rightPad.toJson())
+            .put("stick", stick.toJson()).put("rightStick", rightStick.toJson()).put("leftPad", leftPad.toJson()).put("rightPad", rightPad.toJson())
             .put("gyro", gyro.toJson()).put("haptics", hapticStrength).put("rumble", rumble).put("led", ledBrightness)
     }
 
@@ -310,6 +333,7 @@ class Profile(
             p.leftTrigger = TriggerConfig.fromJson(o.optJSONObject("leftTrigger"))
             p.rightTrigger = TriggerConfig.fromJson(o.optJSONObject("rightTrigger"))
             p.stick = SurfaceConfig.fromJson(o.optJSONObject("stick"))
+            o.optJSONObject("rightStick")?.let { p.rightStick = SurfaceConfig.fromJson(it) }
             p.leftPad = SurfaceConfig.fromJson(o.optJSONObject("leftPad"))
             p.rightPad = SurfaceConfig.fromJson(o.optJSONObject("rightPad"))
             p.gyro = GyroConfig.fromJson(o.optJSONObject("gyro"))

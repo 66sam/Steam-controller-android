@@ -122,7 +122,7 @@ class MainActivity : Activity() {
         val f = statusForm
         f.clear()
         f.header("SC Mapper")
-        f.note("Original Steam Controller → Android gamepad, keyboard and mouse.")
+        f.note("Steam Controller (2015) and Steam Controller (2026) → Android gamepad, keyboard and mouse.")
 
         f.subheader("Virtual devices")
         when {
@@ -222,7 +222,11 @@ class MainActivity : Activity() {
         val f = profilesForm
         f.clear()
         f.header("Profiles")
-        f.note("Tap to activate, long-press to edit. On the controller: Steam + RB / LB to cycle, Steam + ◀ or ▶ for the menu.")
+        f.note(
+            "Import also accepts Steam Input configurations (.vdf), e.g. from steaminputdb.com. " +
+                "Tap to activate, long-press to edit. On the controller: Steam + RB / LB to cycle, Steam + ◀ or ▶ " +
+                "(or the … button on the 2026 controller) for the menu."
+        )
         val active = app.profiles.activeName
         for (p in app.profiles.list()) {
             val on = p.name == active
@@ -235,7 +239,7 @@ class MainActivity : Activity() {
             "New profile" to { newProfile() },
         )
         f.buttons(
-            "Import…" to {
+            "Import (.json / Steam .vdf)…" to {
                 startActivityForResult(
                     Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"), REQ_IMPORT,
                 )
@@ -296,12 +300,23 @@ class MainActivity : Activity() {
         if (requestCode == REQ_IMPORT && resultCode == RESULT_OK) {
             try {
                 val text = contentResolver.openInputStream(uri)!!.bufferedReader().use { it.readText() }
-                val p = app.profiles.import(text)
-                Toast.makeText(this, "Imported \"${p.name}\"", Toast.LENGTH_SHORT).show()
+                val (p, notes) = app.profiles.import(text, displayName(uri))
+                val message = if (notes.isEmpty()) "Imported without changes." else "Imported, with these limitations:\n\n• " + notes.joinToString("\n• ")
+                AlertDialog.Builder(this).setTitle("Imported \"${p.name}\"").setMessage(message)
+                    .setPositiveButton("Edit") { _, _ -> edit(p.name) }
+                    .setNegativeButton(android.R.string.ok, null).show()
             } catch (e: Exception) {
                 Toast.makeText(this, "Import failed: ${e.message}", Toast.LENGTH_LONG).show()
             }
         }
+    }
+
+    private fun displayName(uri: Uri): String? = try {
+        contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+            if (it.moveToFirst()) it.getString(0) else null
+        }
+    } catch (_: Exception) {
+        null
     }
 
     // ------------------------------------------------------------------ settings and help
@@ -326,16 +341,17 @@ class MainActivity : Activity() {
         f.header("Controller shortcuts")
         f.note(
             "Steam + RB / LB — next / previous profile\n" +
-                "Steam + ◀ or ▶ — profile menu (navigate with stick or left pad, A selects, B closes)\n" +
+                "Steam + ◀ or ▶ — profile menu (navigate with stick, left pad or d-pad, A selects, B closes)\n" +
+                "… (quick access, 2026) — profile menu in the built-in presets\n" +
                 "Steam + Y — gyro on / off\n" +
                 "Steam + X — calibrate gyro (hold still for a second)\n" +
-                "Hold Steam 3 s — turn the controller off\n" +
+                "Hold Steam 3 s — turn the controller off (2015)\n" +
                 "Tap Steam alone — the Steam button's own binding (Guide by default)"
         )
         f.header("Setup")
         f.note(
             "1. Install and start Shizuku (Wireless debugging, or root). Grant SC Mapper access when asked.\n" +
-                "2. USB: plug in the controller or the wireless receiver (USB-C OTG adapter) and accept the prompt.\n" +
+                "2. USB: plug in the controller or its wireless receiver (USB-C / OTG adapter) and accept the prompt.\n" +
                 "3. Bluetooth: " + BLE_HELP
         )
     }
@@ -347,8 +363,10 @@ class MainActivity : Activity() {
     companion object {
         private const val REQ_PERMISSIONS = 1
         private const val REQ_IMPORT = 2
-        const val BLE_HELP = "The controller needs Valve's Bluetooth (BLE) firmware, installed once from Steam on a PC " +
+        const val BLE_HELP = "Steam Controller (2026): put it in Bluetooth pairing mode, pair it in Android's Bluetooth " +
+            "settings, then use \"Add Bluetooth\" here.\n" +
+            "Steam Controller (2015): it needs Valve's Bluetooth (BLE) firmware, installed once from Steam on a PC " +
             "(Big Picture → Settings → Controller → your Steam Controller → firmware update). Hold Y while pressing the " +
-            "Steam button to enter Bluetooth pairing mode, pair it in Android's Bluetooth settings, then use \"Add Bluetooth\" here."
+            "Steam button to enter pairing mode, pair it in Android's Bluetooth settings, then use \"Add Bluetooth\" here."
     }
 }

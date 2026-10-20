@@ -1,7 +1,6 @@
 package dev.scmapper.mapping
 
 import dev.scmapper.controller.RawState
-import dev.scmapper.controller.SteamProtocol
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -17,6 +16,8 @@ import kotlin.math.sin
 interface MapperHost {
     /** Plays a haptic pulse on one trackpad. Already scaled by the profile's strength. */
     fun haptic(right: Boolean, onUs: Int, offUs: Int, count: Int)
+    /** Game rumble, each side 0..1, already scaled; called repeatedly while active, then with zeros. */
+    fun rumble(low: Float, high: Float)
     fun special(s: Special)
     fun turnOffController()
     fun calibrated()
@@ -54,6 +55,7 @@ class Mapper(private val host: MapperHost) {
 
     private val buttonRt = HashMap<Btn, ButtonRt>()
     private val stickRt = SurfaceRt()
+    private val rstickRt = SurfaceRt()
     private val lpadRt = SurfaceRt()
     private val rpadRt = SurfaceRt()
     private var ltSoft = false
@@ -78,6 +80,7 @@ class Mapper(private val host: MapperHost) {
     private var rumbleWeak = 0f
     private var rumbleUntil = 0L
     private var nextRumble = 0L
+    private var rumbleActive = false
 
     // Menu navigation edges.
     private var menuPrevDir = 0
@@ -107,7 +110,7 @@ class Mapper(private val host: MapperHost) {
 
     private fun resetRuntime() {
         buttonRt.clear()
-        for (rt in listOf(stickRt, lpadRt, rpadRt)) {
+        for (rt in listOf(stickRt, rstickRt, lpadRt, rpadRt)) {
             rt.wasTouched = false; rt.vx = 0f; rt.vy = 0f; rt.zone = -1; rt.hasAngle = false; rt.angleAcc = 0f
         }
         pulses.clear()
@@ -154,19 +157,20 @@ class Mapper(private val host: MapperHost) {
         processSteamButton(s.buttons, nowMs)
 
         // Triggers.
-        ltSoft = processTrigger(profile.leftTrigger, s.lt, buttons and SteamProtocol.B_LT != 0, ltSoft, "lt")
-        rtSoft = processTrigger(profile.rightTrigger, s.rt, buttons and SteamProtocol.B_RT != 0, rtSoft, "rt")
+        ltSoft = processTrigger(profile.leftTrigger, s.lt, buttons and Btn.LT_CLICK.bit != 0, ltSoft, "lt")
+        rtSoft = processTrigger(profile.rightTrigger, s.rt, buttons and Btn.RT_CLICK.bit != 0, rtSoft, "rt")
 
-        // Stick and pads.
+        // Sticks and pads.
         processSurface(profile.stick, stickRt, s.stickX / 32767f, s.stickY / 32767f, true, false, isStick = true, right = false, key = "stick", dt = dt, nowMs = nowMs)
+        processSurface(profile.rightStick, rstickRt, s.rstickX / 32767f, s.rstickY / 32767f, true, false, isStick = true, right = true, key = "rstick", dt = dt, nowMs = nowMs)
         processSurface(
             profile.leftPad, lpadRt, s.lpadX / 32767f, s.lpadY / 32767f,
-            s.pressed(SteamProtocol.B_LPAD_TOUCH), buttons and SteamProtocol.B_LPAD_CLICK != 0,
+            s.pressed(Btn.LPAD_TOUCH), buttons and Btn.LPAD_CLICK.bit != 0,
             isStick = false, right = false, key = "lpad", dt = dt, nowMs = nowMs,
         )
         processSurface(
             profile.rightPad, rpadRt, s.rpadX / 32767f, s.rpadY / 32767f,
-            s.pressed(SteamProtocol.B_RPAD_TOUCH), buttons and SteamProtocol.B_RPAD_CLICK != 0,
+            s.pressed(Btn.RPAD_TOUCH), buttons and Btn.RPAD_CLICK.bit != 0,
             isStick = false, right = true, key = "rpad", dt = dt, nowMs = nowMs,
         )
 
@@ -187,13 +191,13 @@ class Mapper(private val host: MapperHost) {
 
     // ---------------------------------------------------------------- Steam button
 
-    private val chordBits = listOf(Btn.A, Btn.B, Btn.X, Btn.Y, Btn.LB, Btn.RB, Btn.BACK, Btn.START, Btn.LGRIP, Btn.RGRIP)
-        .fold(0) { acc, b -> acc or b.bit }
+    /** Buttons that take part in Steam + button shortcuts (and are swallowed while Steam is held). */
+    private val chordBits = Btn.entries.filter { it.bindable && it != Btn.STEAM }.fold(0) { acc, b -> acc or b.bit }
 
     /** Handles Steam + button shortcuts; returns the button bits left for normal mapping. */
     private fun handleSteamChords(raw: Int, nowMs: Long): Int {
-        val steam = raw and SteamProtocol.B_STEAM != 0
-        val wasSteam = prevButtons and SteamProtocol.B_STEAM != 0
+        val steam = raw and Btn.STEAM.bit != 0
+        val wasSteam = prevButtons and Btn.STEAM.bit != 0
         if (steam && !wasSteam) {
             steamDownAt = nowMs
             steamChordUsed = false
@@ -212,14 +216,14 @@ class Mapper(private val host: MapperHost) {
             }
         }
         suppressed = suppressed and raw
-        return raw and suppressed.inv() and SteamProtocol.B_STEAM.inv()
+        return raw and suppressed.inv() and Btn.STEAM.bit.inv()
     }
 
     private fun chord(b: Btn, nowMs: Long) {
         when (b) {
             Btn.RB -> host.special(Special.NEXT_PROFILE)
             Btn.LB -> host.special(Special.PREV_PROFILE)
-            Btn.BACK, Btn.START -> host.special(Special.PROFILE_MENU)
+            Btn.BACK, Btn.START, Btn.QAM -> host.special(Special.PROFILE_MENU)
             Btn.Y -> host.special(Special.TOGGLE_GYRO)
             Btn.X -> calibrateGyro(nowMs)
             else -> {}
@@ -229,8 +233,8 @@ class Mapper(private val host: MapperHost) {
     /** The Steam button is a modifier: its own binding fires on tap (or long hold) without a chord. */
     private fun processSteamButton(raw: Int, nowMs: Long) {
         val binding = profile.buttons[Btn.STEAM] ?: return
-        val steam = raw and SteamProtocol.B_STEAM != 0
-        val wasSteam = prevButtons and SteamProtocol.B_STEAM != 0
+        val steam = raw and Btn.STEAM.bit != 0
+        val wasSteam = prevButtons and Btn.STEAM.bit != 0
         if (steam && !steamChordUsed && !binding.hold.isNone && nowMs - steamDownAt >= HOLD_MS) {
             steamHoldActive = true
             apply(binding.hold, "steam:hold")
@@ -615,12 +619,19 @@ class Mapper(private val host: MapperHost) {
     }
 
     private fun processRumble(nowMs: Long) {
-        if (!profile.rumble || nowMs > rumbleUntil) return
-        if (nowMs < nextRumble || (rumbleStrong <= 0.01f && rumbleWeak <= 0.01f)) return
+        val k = profile.hapticStrength / 100f
+        val on = profile.rumble && nowMs <= rumbleUntil && k > 0f && (rumbleStrong > 0.01f || rumbleWeak > 0.01f)
+        if (!on) {
+            if (rumbleActive) {
+                rumbleActive = false
+                host.rumble(0f, 0f)
+            }
+            return
+        }
+        if (nowMs < nextRumble) return
         nextRumble = nowMs + RUMBLE_INTERVAL_MS
-        // Approximate a rumble motor with a fast pulse train; "on" time sets the strength.
-        if (rumbleStrong > 0.01f) hapticScaled(false, (400 + 3600 * rumbleStrong).toInt(), 3500, 9)
-        if (rumbleWeak > 0.01f) hapticScaled(true, (300 + 2200 * rumbleWeak).toInt(), 2500, 12)
+        rumbleActive = true
+        host.rumble(rumbleStrong * k, rumbleWeak * k)
     }
 
     // ---------------------------------------------------------------- on-screen menu
@@ -628,11 +639,13 @@ class Mapper(private val host: MapperHost) {
     private fun handleMenu(s: RawState, buttons: Int) {
         frame.clearLevels()
         val pressedNow = buttons and prevButtons.inv()
-        if (pressedNow and (SteamProtocol.B_A or SteamProtocol.B_RPAD_CLICK or SteamProtocol.B_RT) != 0) host.menuNavigate(MenuNav.SELECT)
-        if (pressedNow and (SteamProtocol.B_B or SteamProtocol.B_BACK) != 0) host.menuNavigate(MenuNav.CLOSE)
-        // Up/down from the stick or the left pad.
+        if (pressedNow and (Btn.A.bit or Btn.RPAD_CLICK.bit or Btn.RT_CLICK.bit) != 0) host.menuNavigate(MenuNav.SELECT)
+        if (pressedNow and (Btn.B.bit or Btn.BACK.bit or Btn.QAM.bit) != 0) host.menuNavigate(MenuNav.CLOSE)
+        // Up/down from the stick, the left pad or the d-pad.
         var y = s.stickY / 32767f
-        if (s.pressed(SteamProtocol.B_LPAD_TOUCH) && abs(s.lpadY / 32767f) > abs(y)) y = s.lpadY / 32767f
+        if (s.pressed(Btn.LPAD_TOUCH) && abs(s.lpadY / 32767f) > abs(y)) y = s.lpadY / 32767f
+        if (s.pressed(Btn.DPAD_UP)) y = 1f
+        if (s.pressed(Btn.DPAD_DOWN)) y = -1f
         val dir = when {
             y > 0.5f -> 1
             y < -0.5f -> -1

@@ -17,6 +17,7 @@ import dev.scmapper.mapping.GyroAxis
 import dev.scmapper.mapping.GyroConfig
 import dev.scmapper.mapping.GyroMode
 import dev.scmapper.mapping.Profile
+import dev.scmapper.mapping.SteamInputVdf
 import dev.scmapper.mapping.StickTarget
 import dev.scmapper.mapping.SurfaceConfig
 import dev.scmapper.mapping.SurfaceMode
@@ -29,6 +30,7 @@ class ProfileEditorActivity : Activity() {
     private lateinit var profile: Profile
     private lateinit var form: Form
     private lateinit var scroll: ScrollView
+    private var exportVdf = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -64,18 +66,15 @@ class ProfileEditorActivity : Activity() {
             "Rename" to { rename() },
         )
         f.buttons(
-            "Export" to {
-                startActivityForResult(
-                    Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
-                        .setType("application/json").putExtra(Intent.EXTRA_TITLE, "${profile.name}.json"),
-                    REQ_EXPORT,
-                )
-            },
+            "Export…" to { export() },
             "Delete" to { delete() },
         )
 
         f.header("Buttons")
-        f.note("Tap a button to set what it does. A long-press action makes a short press tap the normal action instead.")
+        f.note(
+            "Tap a button to set what it does. A long-press action makes a short press tap the normal action instead. " +
+                "Inputs marked 2026 only exist on the Steam Controller (2026)."
+        )
         for (b in Btn.entries.filter { it.bindable }) {
             val binding = profile.binding(b)
             val extra = buildString {
@@ -89,8 +88,10 @@ class ProfileEditorActivity : Activity() {
         trigger("Left trigger", profile.leftTrigger)
         trigger("Right trigger", profile.rightTrigger)
 
-        f.header("Joystick")
+        f.header("Left stick")
         surface(profile.stick, isStick = true)
+        f.header("Right stick (2026)")
+        surface(profile.rightStick, isStick = true)
         f.header("Left trackpad")
         surface(profile.leftPad, isStick = false)
         f.header("Right trackpad")
@@ -239,6 +240,21 @@ class ProfileEditorActivity : Activity() {
         f.note("Steam + Y toggles gyro, Steam + X recalibrates it.")
     }
 
+    private fun export() {
+        val formats = arrayOf("SC Mapper profile (.json) — keeps everything", "Steam Input configuration (.vdf) — best effort")
+        AlertDialog.Builder(this).setTitle("Export as")
+            .setItems(formats) { _, which ->
+                exportVdf = which == 1
+                val (mime, ext) = if (exportVdf) "application/octet-stream" to "vdf" else "application/json" to "json"
+                startActivityForResult(
+                    Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
+                        .setType(mime).putExtra(Intent.EXTRA_TITLE, "${profile.name}.$ext"),
+                    REQ_EXPORT,
+                )
+            }
+            .setNegativeButton(android.R.string.cancel, null).show()
+    }
+
     private fun rename() {
         val input = EditText(this).apply { setText(profile.name) }
         AlertDialog.Builder(this).setTitle("Rename").setView(input)
@@ -270,7 +286,8 @@ class ProfileEditorActivity : Activity() {
         val uri = data?.data ?: return
         if (requestCode == REQ_EXPORT && resultCode == RESULT_OK) {
             try {
-                contentResolver.openOutputStream(uri)!!.bufferedWriter().use { it.write(profile.toJson().toString(2)) }
+                val text = if (exportVdf) SteamInputVdf.export(profile) else profile.toJson().toString(2)
+                contentResolver.openOutputStream(uri)!!.bufferedWriter().use { it.write(text) }
                 Toast.makeText(this, "Exported", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
                 Toast.makeText(this, "Export failed: ${e.message}", Toast.LENGTH_LONG).show()

@@ -82,11 +82,21 @@ class ProfileStore(context: Context) {
         notifyChanged()
     }
 
-    fun import(json: String): Profile {
-        val p = Profile.fromJson(JSONObject(json))
-        p.name = uniqueName(p.name.ifBlank { "Imported" })
+    /**
+     * Imports an SC Mapper profile (JSON) or a Steam Input configuration (.vdf).
+     * Returns the saved profile and notes about anything that couldn't be converted.
+     */
+    fun import(text: String, fileName: String?): Pair<Profile, List<String>> {
+        val base = fileName?.substringBeforeLast('.')?.takeIf { it.isNotBlank() } ?: "Imported"
+        val (p, notes) = if (text.trimStart().startsWith("{")) {
+            Profile.fromJson(JSONObject(text)) to emptyList()
+        } else {
+            val r = SteamInputVdf.import(text, base)
+            r.profile to r.notes
+        }
+        p.name = uniqueName(p.name.ifBlank { base })
         save(p)
-        return p
+        return p to notes
     }
 
     private fun fileFor(name: String) = File(dir, sanitize(name) + ".json")

@@ -1,7 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Steam Controller (wired) -->
+    <!-- Steam Controller (2015), cable -->
     <usb-device vendor-id="10462" product-id="4354" />
-    <!-- Steam Controller wireless receiver (dongle) -->
+    <!-- Steam Controller (2015) wireless receiver -->
     <usb-device vendor-id="10462" product-id="4418" />
+    <!-- Steam Controller (2026), cable -->
+    <usb-device vendor-id="10462" product-id="4866" />
+    <!-- Steam Controller (2026) wireless receivers -->
+    <usb-device vendor-id="10462" product-id="4868" />
+    <usb-device vendor-id="10462" product-id="4869" />
 </resources>

@@ -22,6 +22,7 @@ import dev.scmapper.R
 import dev.scmapper.controller.BleControllerManager
 import dev.scmapper.controller.ControllerLink
 import dev.scmapper.controller.ControllerListener
+import dev.scmapper.controller.ControllerModel
 import dev.scmapper.controller.RawState
 import dev.scmapper.controller.UsbControllerManager
 import dev.scmapper.mapping.GyroMode
@@ -83,6 +84,8 @@ class BridgeService : Service(), ControllerListener {
         override fun haptic(right: Boolean, onUs: Int, offUs: Int, count: Int) {
             if (!link.busy) link.haptic(right, onUs, offUs, count)
         }
+
+        override fun rumble(low: Float, high: Float) = link.rumble(low, high)
 
         override fun special(s: Special) = onSpecial(this, s)
 
@@ -265,7 +268,12 @@ class BridgeService : Service(), ControllerListener {
                     return
                 }
                 val now = System.nanoTime()
-                for (e in entries.values) if (e.slot >= 0 && now - e.lastStepNanos > (TICK_MS - 2) * 1_000_000) e.step()
+                val nowMs = SystemClock.uptimeMillis()
+                for (e in entries.values) {
+                    if (e.slot < 0) continue
+                    if (now - e.lastStepNanos > (TICK_MS - 2) * 1_000_000) e.step()
+                    e.link.tick(nowMs)
+                }
                 engine.postDelayed(this, TICK_MS)
             }
         })
@@ -334,10 +342,10 @@ class BridgeService : Service(), ControllerListener {
 
     // ------------------------------------------------------------------ API for the UI
 
-    class ControllerInfo(val id: String, val label: String, val slot: Int, val battery: Int, val isBle: Boolean)
+    class ControllerInfo(val id: String, val label: String, val slot: Int, val battery: Int, val model: ControllerModel)
 
     fun controllers(): List<ControllerInfo> = entries.values.map {
-        ControllerInfo(it.link.id, it.link.label, it.slot, it.link.state.battery, it.link.isBle)
+        ControllerInfo(it.link.id, it.link.label, it.slot, it.link.state.battery, it.link.model)
     }.sortedBy { it.slot }
 
     fun stateText(id: String): String? = entries[id]?.link?.state?.describe()

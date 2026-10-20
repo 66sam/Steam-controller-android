@@ -1,60 +1,78 @@
 package dev.scmapper.controller
 
+import dev.scmapper.mapping.Btn
+import kotlin.math.cos
+import kotlin.math.sin
+
 /**
- * Wire protocol of the original (2015) Steam Controller.
+ * Wire protocol of the Steam Controller (2015), codename "D0G".
  *
- * Sources: Valve's HID code as shipped in SDL (SDL_hidapi_steam.c / steam/controller_constants.h)
- * and the community projects sc-controller and steamcontroller (ynsta).
+ * Follows Valve's own code as shipped in SDL (SDL_hidapi_steam.c, steam/controller_structs.h).
  */
-object SteamProtocol {
-    const val VENDOR_VALVE = 0x28DE
+object Sc2015Protocol {
     const val PRODUCT_WIRED = 0x1102
     const val PRODUCT_DONGLE = 0x1142
 
-    // Feature report message ids (first byte of the 64 byte feature report payload).
+    // Feature report message ids (first byte of the feature report payload).
     const val ID_CLEAR_DIGITAL_MAPPINGS = 0x81
-    const val ID_LOAD_DEFAULT_SETTINGS = 0x85
     const val ID_SET_SETTINGS_VALUES = 0x87
     const val ID_TRIGGER_HAPTIC_PULSE = 0x8F
     const val ID_TURN_OFF_CONTROLLER = 0x9F
 
-    // Settings registers for ID_SET_SETTINGS_VALUES.
-    const val SETTING_LEFT_TRACKPAD_MODE = 0x07
-    const val SETTING_RIGHT_TRACKPAD_MODE = 0x08
-    const val SETTING_LED_USER_BRIGHTNESS = 0x2D
-    const val SETTING_GYRO_MODE = 0x30
-    const val SETTING_SLEEP_INACTIVITY_TIMEOUT = 0x32
-    const val TRACKPAD_NONE = 0x07
+    // Settings registers (controller_constants.h).
+    const val SETTING_LEFT_TRACKPAD_MODE = 7
+    const val SETTING_RIGHT_TRACKPAD_MODE = 8
+    const val SETTING_LIZARD_MODE = 9
+    const val SETTING_LED_USER_BRIGHTNESS = 45
+    const val SETTING_IMU_MODE = 48
+    const val SETTING_SLEEP_INACTIVITY_TIMEOUT = 50
+    const val TRACKPAD_NONE = 7
 
-    const val GYRO_SEND_ORIENTATION = 0x04
-    const val GYRO_SEND_RAW_ACCEL = 0x08
-    const val GYRO_SEND_RAW_GYRO = 0x10
+    const val IMU_SEND_ORIENTATION = 0x04
+    const val IMU_SEND_RAW_ACCEL = 0x08
+    const val IMU_SEND_RAW_GYRO = 0x10
 
     // Input report types (byte 2 of a USB input report).
     const val REPORT_STATE = 0x01
     const val REPORT_WIRELESS = 0x03
     const val REPORT_STATUS = 0x04
 
-    // Button bits, identical for USB and BLE in the low 24 bits.
-    const val B_RT = 1 shl 0
-    const val B_LT = 1 shl 1
-    const val B_RB = 1 shl 2
-    const val B_LB = 1 shl 3
-    const val B_Y = 1 shl 4
-    const val B_B = 1 shl 5
-    const val B_X = 1 shl 6
-    const val B_A = 1 shl 7
-    const val B_BACK = 1 shl 12
-    const val B_STEAM = 1 shl 13
-    const val B_START = 1 shl 14
-    const val B_LGRIP = 1 shl 15
-    const val B_RGRIP = 1 shl 16
-    const val B_LPAD_CLICK = 1 shl 17
-    const val B_RPAD_CLICK = 1 shl 18
-    const val B_LPAD_TOUCH = 1 shl 19
-    const val B_RPAD_TOUCH = 1 shl 20
-    const val B_STICK_CLICK = 1 shl 22
-    const val B_LPAD_AND_STICK = 1 shl 23
+    // Wire button bits (low 24 bits, same over USB and BLE).
+    const val W_RT = 1 shl 0
+    const val W_LT = 1 shl 1
+    const val W_RB = 1 shl 2
+    const val W_LB = 1 shl 3
+    const val W_Y = 1 shl 4
+    const val W_B = 1 shl 5
+    const val W_X = 1 shl 6
+    const val W_A = 1 shl 7
+    const val W_BACK = 1 shl 12
+    const val W_STEAM = 1 shl 13
+    const val W_START = 1 shl 14
+    const val W_LGRIP = 1 shl 15
+    const val W_RGRIP = 1 shl 16
+    const val W_LPAD_CLICK = 1 shl 17
+    const val W_RPAD_CLICK = 1 shl 18
+    const val W_LPAD_TOUCH = 1 shl 19
+    const val W_RPAD_TOUCH = 1 shl 20
+    const val W_STICK_CLICK = 1 shl 22
+    const val W_LPAD_AND_STICK = 1 shl 23
+
+    private val wireToBtn = listOf(
+        W_RT to Btn.RT_CLICK, W_LT to Btn.LT_CLICK, W_RB to Btn.RB, W_LB to Btn.LB,
+        W_Y to Btn.Y, W_B to Btn.B, W_X to Btn.X, W_A to Btn.A,
+        W_BACK to Btn.BACK, W_STEAM to Btn.STEAM, W_START to Btn.START,
+        W_LGRIP to Btn.LGRIP, W_RGRIP to Btn.RGRIP,
+        W_LPAD_CLICK to Btn.LPAD_CLICK, W_RPAD_CLICK to Btn.RPAD_CLICK,
+        W_LPAD_TOUCH to Btn.LPAD_TOUCH, W_RPAD_TOUCH to Btn.RPAD_TOUCH,
+        W_STICK_CLICK to Btn.STICK_CLICK,
+    )
+
+    fun translate(wire: Int): Int {
+        var out = 0
+        for ((w, b) in wireToBtn) if (wire and w != 0) out = out or b.bit
+        return out
+    }
 
     // BLE GATT.
     const val BLE_SERVICE = "100f6c32-1735-4313-b402-38567131e5f3"
@@ -72,40 +90,63 @@ object SteamProtocol {
     private const val BLE_CHUNK_QUAT = 0x1000
     private const val BLE_SEGMENT_PAYLOAD = 18
 
+    /** Steam rotates the raw pad coordinates by 15° (left pad -15°, right pad +15°). */
+    private const val PAD_ROTATION_RAD = 0.261799
+
+    private val cosR = cos(PAD_ROTATION_RAD).toFloat()
+    private val sinR = sin(PAD_ROTATION_RAD).toFloat()
+
     private fun s16(b: ByteArray, o: Int): Int = ((b[o].toInt() and 0xFF) or (b[o + 1].toInt() shl 8)).toShort().toInt()
     private fun u8(b: ByteArray, o: Int): Int = b[o].toInt() and 0xFF
+
+    private fun setLeftPad(state: RawState, x: Int, y: Int) {
+        // Rotate by -15°.
+        state.lpadX = (cosR * x + sinR * y).toInt().coerceIn(-32768, 32767)
+        state.lpadY = (-sinR * x + cosR * y).toInt().coerceIn(-32768, 32767)
+    }
+
+    private fun setRightPad(state: RawState, x: Int, y: Int) {
+        // Rotate by +15°.
+        state.rpadX = (cosR * x - sinR * y).toInt().coerceIn(-32768, 32767)
+        state.rpadY = (sinR * x + cosR * y).toInt().coerceIn(-32768, 32767)
+    }
 
     /**
      * Parses a 64 byte USB input report into [state].
      * Returns the report type, or -1 if the packet isn't a Valve report.
+     *
+     * Layout (ValveInReport_t): u16 version, u8 type, u8 length, then for a state report:
+     * u32 packet, u8[8] buttons (bytes 3/4 = triggers), s16 left pad/stick x,y, s16 right pad x,y,
+     * u16 triggers L,R, s16 accel xyz, s16 gyro xyz, s16 quaternion wxyz.
      */
     fun parseUsb(b: ByteArray, len: Int, state: RawState): Int {
         if (len < 4 || u8(b, 0) != 0x01) return -1
         val type = u8(b, 2)
         when (type) {
             REPORT_STATE -> {
-                if (len < 44) return -1
-                val buttons = u8(b, 8) or (u8(b, 9) shl 8) or (u8(b, 10) shl 16)
-                state.buttons = buttons and B_LPAD_AND_STICK.inv()
+                if (len < 40) return -1
+                val wire = u8(b, 8) or (u8(b, 9) shl 8) or (u8(b, 10) shl 16)
+                var buttons = translate(wire)
                 state.lt = u8(b, 11)
                 state.rt = u8(b, 12)
                 val x = s16(b, 16)
                 val y = s16(b, 18)
                 // The left pad and the stick share these fields. When both are in use the
-                // controller alternates and sets B_LPAD_AND_STICK; the touch bit says which one
+                // controller alternates and sets W_LPAD_AND_STICK; the touch bit says which one
                 // this packet carries.
-                val both = buttons and B_LPAD_AND_STICK != 0
-                if (buttons and B_LPAD_TOUCH != 0) {
-                    state.lpadX = x; state.lpadY = y
+                val both = wire and W_LPAD_AND_STICK != 0
+                if (wire and W_LPAD_TOUCH != 0) {
+                    setLeftPad(state, x, y)
                     if (!both) { state.stickX = 0; state.stickY = 0 }
                 } else {
                     state.stickX = x; state.stickY = y
-                    if (both) state.buttons = state.buttons or B_LPAD_TOUCH
+                    if (both) buttons = buttons or Btn.LPAD_TOUCH.bit
                     else { state.lpadX = 0; state.lpadY = 0 }
                 }
-                state.rpadX = s16(b, 20); state.rpadY = s16(b, 22)
-                state.accelX = s16(b, 24); state.accelY = s16(b, 26); state.accelZ = s16(b, 28)
-                state.gyroX = s16(b, 30); state.gyroY = s16(b, 32); state.gyroZ = s16(b, 34)
+                state.buttons = buttons
+                setRightPad(state, s16(b, 20), s16(b, 22))
+                state.accelX = s16(b, 28); state.accelY = s16(b, 30); state.accelZ = s16(b, 32)
+                state.gyroX = s16(b, 34); state.gyroY = s16(b, 36); state.gyroZ = s16(b, 38)
             }
             REPORT_STATUS -> {
                 if (len >= 15) {
@@ -127,14 +168,14 @@ object SteamProtocol {
         o += 2
         fun has(chunk: Int, size: Int) = mask and chunk != 0 && o + size <= raw.size
         if (has(BLE_CHUNK_BUTTONS1, 3)) {
-            state.buttons = (u8(raw, o) or (u8(raw, o + 1) shl 8) or (u8(raw, o + 2) shl 16)) and B_LPAD_AND_STICK.inv()
+            state.buttons = translate(u8(raw, o) or (u8(raw, o + 1) shl 8) or (u8(raw, o + 2) shl 16))
             o += 3
         }
         if (has(BLE_CHUNK_TRIGGERS, 2)) { state.lt = u8(raw, o); state.rt = u8(raw, o + 1); o += 2 }
         if (has(BLE_CHUNK_BUTTONS3, 3)) o += 3
         if (has(BLE_CHUNK_STICK, 4)) { state.stickX = s16(raw, o); state.stickY = s16(raw, o + 2); o += 4 }
-        if (has(BLE_CHUNK_LPAD, 4)) { state.lpadX = s16(raw, o); state.lpadY = s16(raw, o + 2); o += 4 }
-        if (has(BLE_CHUNK_RPAD, 4)) { state.rpadX = s16(raw, o); state.rpadY = s16(raw, o + 2); o += 4 }
+        if (has(BLE_CHUNK_LPAD, 4)) { setLeftPad(state, s16(raw, o), s16(raw, o + 2)); o += 4 }
+        if (has(BLE_CHUNK_RPAD, 4)) { setRightPad(state, s16(raw, o), s16(raw, o + 2)); o += 4 }
         if (has(BLE_CHUNK_ACCEL, 6)) {
             state.accelX = s16(raw, o); state.accelY = s16(raw, o + 2); state.accelZ = s16(raw, o + 4); o += 6
         }
@@ -142,8 +183,8 @@ object SteamProtocol {
             state.gyroX = s16(raw, o); state.gyroY = s16(raw, o + 2); state.gyroZ = s16(raw, o + 4); o += 6
         }
         if (has(BLE_CHUNK_QUAT, 8)) o += 8
-        if (state.buttons and B_LPAD_TOUCH == 0) { state.lpadX = 0; state.lpadY = 0 }
-        if (state.buttons and B_RPAD_TOUCH == 0) { state.rpadX = 0; state.rpadY = 0 }
+        if (!state.pressed(Btn.LPAD_TOUCH)) { state.lpadX = 0; state.lpadY = 0 }
+        if (!state.pressed(Btn.RPAD_TOUCH)) { state.rpadX = 0; state.rpadY = 0 }
         return true
     }
 
@@ -165,16 +206,16 @@ object SteamProtocol {
 
     /** Disables "lizard mode" (built-in keyboard/mouse emulation) and configures IMU reporting. */
     fun configure(gyro: Boolean, ble: Boolean): ByteArray {
-        val gyroMode = when {
+        val imuMode = when {
             !gyro -> 0
-            ble -> GYRO_SEND_RAW_GYRO
-            else -> GYRO_SEND_RAW_GYRO or GYRO_SEND_RAW_ACCEL or GYRO_SEND_ORIENTATION
+            ble -> IMU_SEND_RAW_GYRO
+            else -> IMU_SEND_RAW_GYRO or IMU_SEND_RAW_ACCEL or IMU_SEND_ORIENTATION
         }
         return settings(
             SETTING_LEFT_TRACKPAD_MODE to TRACKPAD_NONE,
             SETTING_RIGHT_TRACKPAD_MODE to TRACKPAD_NONE,
             SETTING_SLEEP_INACTIVITY_TIMEOUT to 900,
-            SETTING_GYRO_MODE to gyroMode,
+            SETTING_IMU_MODE to imuMode,
         )
     }
 
@@ -199,7 +240,7 @@ object SteamProtocol {
 
     fun turnOff() = byteArrayOf(ID_TURN_OFF_CONTROLLER.toByte(), 0x04, 0x6f, 0x66, 0x66, 0x21)
 
-    /** Pads a feature message to the 64 byte USB feature report. */
+    /** Pads a feature message to the 64 byte USB feature report (report id 0). */
     fun usbFeature(msg: ByteArray): ByteArray = msg.copyOf(64)
 
     /** Splits a feature message into BLE report-characteristic writes (segmented, 19 bytes each). */
