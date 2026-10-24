@@ -125,6 +125,37 @@ class ProtocolTest {
     }
 
     @Test
+    fun ble2015Reassembly() {
+        // Exactly what a real controller sent: one complete segment holding an empty state report.
+        val real = byteArrayOf(0xc0.toByte(), 0x04) + ByteArray(17)
+        val a = Sc2015Protocol.BleAssembler()
+        val report = a.add(real)!!
+        assertEquals(0x04, report[0].toInt())
+        assertTrue(Sc2015Protocol.parseBle(report, RawState()))
+
+        // A report split over two segments: buttons (A) + triggers + left stick + right pad + gyro.
+        val mask = 0x10 or 0x20 or 0x80 or 0x200 or 0x800
+        val full = byteArrayOf((0x04 or (mask and 0xF0)).toByte(), (mask shr 8).toByte(), 0x80.toByte(), 0, 0x10, 5, 6) +
+            byteArrayOf(0x10, 0x27, 0, 0) + byteArrayOf(0, 0, 0, 0) + byteArrayOf(1, 0, 2, 0, 3, 0)
+        val seg0 = byteArrayOf(0x80.toByte()) + full.copyOfRange(0, 18)
+        val seg1 = byteArrayOf(0xc1.toByte()) + full.copyOfRange(18, full.size) + ByteArray(36 - full.size)
+        assertEquals(null, a.add(seg0))
+        val joined = a.add(seg1)!!
+        val s = RawState()
+        assertTrue(Sc2015Protocol.parseBle(joined, s))
+        assertTrue(s.pressed(Btn.A))
+        assertEquals(10000, s.stickX)
+        assertEquals(5, s.lt)
+        assertEquals(1, s.gyroX)
+        assertEquals(3, s.gyroZ)
+
+        // A stray second segment without its first one is dropped.
+        assertEquals(null, a.add(seg1))
+        // Segments without the data flag are ignored.
+        assertEquals(null, a.add(ByteArray(19)))
+    }
+
+    @Test
     fun ble2015Segmentation() {
         val msg = Sc2015Protocol.configure(gyro = true, ble = true)
         val segs = Sc2015Protocol.bleSegments(msg)

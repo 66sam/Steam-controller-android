@@ -172,7 +172,41 @@ object Sc2015Protocol {
         return type
     }
 
-    /** Parses a BLE notification from the Valve input characteristic. Returns true on a state report. */
+    /**
+     * Reassembles BLE notifications. Each notification is one segment: a header byte
+     * (0x80 = data, 0x40 = last segment, low 3 bits = segment number) followed by up to 18 payload
+     * bytes; a report spans one or more segments. Mirrors SDL's packet assembler.
+     */
+    class BleAssembler {
+        private val buffer = ByteArray(8 * BLE_SEGMENT_PAYLOAD)
+        private var expected = 0
+
+        /** Returns the complete report when [notification] finishes one, otherwise null. */
+        fun add(notification: ByteArray): ByteArray? {
+            var o = 0
+            // Some stacks prepend the HID report number (0x03).
+            if (notification.size == BLE_SEGMENT_PAYLOAD + 2 && notification[0].toInt() == 0x03) o = 1
+            if (notification.size <= o) return null
+            val header = notification[o].toInt() and 0xFF
+            if (header and 0x80 == 0) return null // empty segment
+            val segment = header and 0x07
+            if (segment != expected) {
+                expected = 0
+                buffer.fill(0)
+                if (segment != 0) return null
+            }
+            val n = minOf(BLE_SEGMENT_PAYLOAD, notification.size - o - 1)
+            System.arraycopy(notification, o + 1, buffer, segment * BLE_SEGMENT_PAYLOAD, n)
+            if (header and 0x40 != 0) {
+                expected = 0
+                return buffer.copyOf((segment + 1) * BLE_SEGMENT_PAYLOAD)
+            }
+            expected = segment + 1
+            return null
+        }
+    }
+
+    /** Parses a reassembled BLE report (see [BleAssembler]). Returns true on a state report. */
     fun parseBle(raw: ByteArray, state: RawState): Boolean {
         var o = 0
         // Some stacks prepend the HID report number (0x03).

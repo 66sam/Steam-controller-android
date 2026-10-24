@@ -68,6 +68,7 @@ class BleControllerManager(private val context: Context, private val listener: C
         private var inputChar: BluetoothGattCharacteristic? = null
         private var batteryChar: BluetoothGattCharacteristic? = null
         private val outputChars = HashMap<Int, BluetoothGattCharacteristic>()
+        private val assembler = Sc2015Protocol.BleAssembler()
         private var model = ControllerModel.SC2015
         /** 2026 notifications don't carry the report id; this is prepended before parsing. */
         private var inputReportId = 0
@@ -282,7 +283,10 @@ class BleControllerManager(private val context: Context, private val listener: C
                     System.arraycopy(value, 0, report, 1, value.size)
                     Sc2026Protocol.parse(report, report.size, l.state) == Sc2026Protocol.Result.STATE
                 } else {
-                    Sc2015Protocol.parseBle(value, l.state)
+                    // 2015 reports arrive in segments; null means "wait for the rest".
+                    val report = assembler.add(value) ?: return
+                    DiagLog.once("ble:${device.address}:report") { "BLE ${safeName(device)}: first report ${DiagLog.hex(report)}" }
+                    Sc2015Protocol.parseBle(report, l.state)
                 }
                 if (ok) listener.onControllerState(l)
                 else DiagLog.once("ble:${device.address}:bad:${value.firstOrNull()}") { "BLE ${safeName(device)}: unrecognised notification ${DiagLog.hex(value)}" }
