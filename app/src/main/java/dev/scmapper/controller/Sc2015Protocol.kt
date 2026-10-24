@@ -18,6 +18,7 @@ object Sc2015Protocol {
     const val ID_SET_SETTINGS_VALUES = 0x87
     const val ID_TRIGGER_HAPTIC_PULSE = 0x8F
     const val ID_TURN_OFF_CONTROLLER = 0x9F
+    const val ID_DONGLE_GET_WIRELESS_STATE = 0xB4
 
     // Settings registers (controller_constants.h).
     const val SETTING_LEFT_TRACKPAD_MODE = 7
@@ -25,6 +26,7 @@ object Sc2015Protocol {
     const val SETTING_LIZARD_MODE = 9
     const val SETTING_LED_USER_BRIGHTNESS = 45
     const val SETTING_IMU_MODE = 48
+    const val SETTING_WIRELESS_PACKET_VERSION = 49
     const val SETTING_SLEEP_INACTIVITY_TIMEOUT = 50
     const val TRACKPAD_NONE = 7
 
@@ -36,6 +38,8 @@ object Sc2015Protocol {
     const val REPORT_STATE = 0x01
     const val REPORT_WIRELESS = 0x03
     const val REPORT_STATUS = 0x04
+    const val REPORT_BLE_STATE = 0x07
+    const val WIRELESS_DISCONNECTED = 1
 
     // Wire button bits (low 24 bits, same over USB and BLE).
     const val W_RT = 1 shl 0
@@ -113,18 +117,20 @@ object Sc2015Protocol {
 
     /**
      * Parses a 64 byte USB input report into [state].
-     * Returns the report type, or -1 if the packet isn't a Valve report.
+     * Returns the report type ([REPORT_STATE] for both state formats), or -1 if the packet isn't a
+     * Valve report.
      *
      * Layout (ValveInReport_t): u16 version, u8 type, u8 length, then for a state report:
      * u32 packet, u8[8] buttons (bytes 3/4 = triggers), s16 left pad/stick x,y, s16 right pad x,y,
-     * u16 triggers L,R, s16 accel xyz, s16 gyro xyz, s16 quaternion wxyz.
+     * then for type 1: u16 triggers L,R, s16 accel xyz, s16 gyro xyz, s16 quaternion wxyz;
+     * for type 7 (what the wireless receiver may send): u8 IMU data type, s16[4] IMU data.
      */
     fun parseUsb(b: ByteArray, len: Int, state: RawState): Int {
         if (len < 4 || u8(b, 0) != 0x01) return -1
         val type = u8(b, 2)
         when (type) {
-            REPORT_STATE -> {
-                if (len < 40) return -1
+            REPORT_STATE, REPORT_BLE_STATE -> {
+                if (len < if (type == REPORT_STATE) 40 else 33) return -1
                 val wire = u8(b, 8) or (u8(b, 9) shl 8) or (u8(b, 10) shl 16)
                 var buttons = translate(wire)
                 state.lt = u8(b, 11)
@@ -145,8 +151,16 @@ object Sc2015Protocol {
                 }
                 state.buttons = buttons
                 setRightPad(state, s16(b, 20), s16(b, 22))
-                state.accelX = s16(b, 28); state.accelY = s16(b, 30); state.accelZ = s16(b, 32)
-                state.gyroX = s16(b, 34); state.gyroY = s16(b, 36); state.gyroZ = s16(b, 38)
+                if (type == REPORT_STATE) {
+                    state.accelX = s16(b, 28); state.accelY = s16(b, 30); state.accelZ = s16(b, 32)
+                    state.gyroX = s16(b, 34); state.gyroY = s16(b, 36); state.gyroZ = s16(b, 38)
+                } else {
+                    when (u8(b, 24)) {
+                        2 -> { state.accelX = s16(b, 25); state.accelY = s16(b, 27); state.accelZ = s16(b, 29) }
+                        3 -> { state.gyroX = s16(b, 25); state.gyroY = s16(b, 27); state.gyroZ = s16(b, 29) }
+                    }
+                }
+                return REPORT_STATE
             }
             REPORT_STATUS -> {
                 if (len >= 15) {
@@ -192,6 +206,9 @@ object Sc2015Protocol {
 
     fun clearDigitalMappings() = byteArrayOf(ID_CLEAR_DIGITAL_MAPPINGS.toByte(), 0)
 
+    /** Asks the wireless receiver to report whether a controller is connected to this slot. */
+    fun getWirelessState() = byteArrayOf(ID_DONGLE_GET_WIRELESS_STATE.toByte(), 0)
+
     fun settings(vararg regs: Pair<Int, Int>): ByteArray {
         val out = ByteArray(2 + regs.size * 3)
         out[0] = ID_SET_SETTINGS_VALUES.toByte()
@@ -215,6 +232,8 @@ object Sc2015Protocol {
             SETTING_LEFT_TRACKPAD_MODE to TRACKPAD_NONE,
             SETTING_RIGHT_TRACKPAD_MODE to TRACKPAD_NONE,
             SETTING_SLEEP_INACTIVITY_TIMEOUT to 900,
+            // As SDL does: the receiver then sends the full state report.
+            SETTING_WIRELESS_PACKET_VERSION to 2,
             SETTING_IMU_MODE to imuMode,
         )
     }

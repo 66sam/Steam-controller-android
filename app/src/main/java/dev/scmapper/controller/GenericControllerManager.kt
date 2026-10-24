@@ -2,7 +2,7 @@ package dev.scmapper.controller
 
 import android.os.Handler
 import android.os.HandlerThread
-import android.util.Log
+import dev.scmapper.DiagLog
 import dev.scmapper.Settings
 import dev.scmapper.output.VirtualDevices
 
@@ -97,11 +97,12 @@ class GenericControllerManager(
         val link = GenericLink(d, nextId++)
         val error = devices.openEvdev(link.evdevId, d.path, grab = true)
         if (error != null) {
-            Log.w(TAG, "Cannot open ${d.name}: $error")
+            DiagLog.log("Cannot open ${d.name}: $error")
             lastError = "${d.name}: $error"
             return
         }
         lastError = null
+        DiagLog.log("Taking over ${d.name} (${d.path})")
         open[d.key] = link
         byEvdevId[link.evdevId] = link
         // Pair the controller's motion sensor device, if the driver created one.
@@ -149,9 +150,5 @@ class GenericControllerManager(
         val link = synchronized(open) { byEvdevId[id] } ?: return
         synchronized(open) { closeLink(link) }
         refresh()
-    }
-
-    companion object {
-        private const val TAG = "GenericControllers"
     }
 }

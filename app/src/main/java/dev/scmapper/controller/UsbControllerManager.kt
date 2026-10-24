@@ -12,7 +12,7 @@ import android.hardware.usb.UsbEndpoint
 import android.hardware.usb.UsbInterface
 import android.hardware.usb.UsbManager
 import android.os.Build
-import android.util.Log
+import dev.scmapper.DiagLog
 
 /**
  * Talks to Steam Controllers through the Android USB host API: the 2015 and 2026 controllers over
@@ -52,7 +52,9 @@ class UsbControllerManager(private val context: Context, private val listener: C
     /** Opens every supported device already plugged in, asking for permission where needed. */
     @Synchronized
     fun scan() {
-        usb.deviceList.values.filter { kindOf(it) != null }.forEach { open(it) }
+        val all = usb.deviceList.values
+        DiagLog.log("USB scan: " + all.joinToString { "%04x:%04x".format(it.vendorId, it.productId) }.ifEmpty { "no USB devices" })
+        all.filter { kindOf(it) != null }.forEach { open(it) }
     }
 
     @Synchronized
@@ -60,25 +62,35 @@ class UsbControllerManager(private val context: Context, private val listener: C
         val kind = kindOf(device) ?: return
         if (opened.containsKey(device.deviceName)) return
         if (!usb.hasPermission(device)) {
+            DiagLog.log("USB ${kind.model.title}: asking for permission")
             val intent = Intent(ACTION_PERMISSION).setPackage(context.packageName)
             val flags = if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0
             usb.requestPermission(device, PendingIntent.getBroadcast(context, device.deviceId, intent, flags))
             return
         }
         val connection = usb.openDevice(device) ?: run {
-            Log.w(TAG, "openDevice failed for ${device.deviceName}")
+            DiagLog.log("USB openDevice failed for ${device.deviceName}")
             return
         }
+        DiagLog.log("USB opened ${kind.model.title}${if (kind.dongle) " receiver" else ""} (%04x:%04x), ${device.interfaceCount} interfaces".format(device.vendorId, device.productId))
         val open = OpenDevice(connection)
         var slot = 0
         for (i in 0 until device.interfaceCount) {
             val iface = device.getInterface(i)
+            DiagLog.log(
+                "  interface ${iface.id}: class ${iface.interfaceClass} protocol ${iface.interfaceProtocol}, endpoints " +
+                    (0 until iface.endpointCount).joinToString { e ->
+                        val ep = iface.getEndpoint(e)
+                        "%02x/type%d/%d".format(ep.address, ep.type, ep.maxPacketSize)
+                    }
+            )
             if (kind.dongle && kind.model == ControllerModel.SC2026 && iface.id !in 2..5) continue
             val epIn = endpoint(iface, UsbConstants.USB_DIR_IN) ?: continue
             if (!connection.claimInterface(iface, true)) {
-                Log.w(TAG, "claimInterface ${iface.id} failed")
+                DiagLog.log("  interface ${iface.id}: claim FAILED")
                 continue
             }
+            DiagLog.log("  interface ${iface.id}: claimed for input")
             slot++
             val label = kind.model.title + if (kind.dongle) " · receiver slot $slot" else " · USB"
             val link = UsbLink(
@@ -88,6 +100,7 @@ class UsbControllerManager(private val context: Context, private val listener: C
             open.links += link
         }
         if (open.links.isEmpty()) {
+            DiagLog.log("USB: no usable controller interface found")
             connection.close()
             return
         }
@@ -142,7 +155,9 @@ class UsbControllerManager(private val context: Context, private val listener: C
                 else -> Sc2015Protocol.usbFeature(msg) to 0
             }
             // HID SET_REPORT(feature) on this interface.
-            return connection.controlTransfer(0x21, 0x09, 0x0300 or reportId, iface.id, data, data.size, 250) >= 0
+            val n = connection.controlTransfer(0x21, 0x09, 0x0300 or reportId, iface.id, data, data.size, 250)
+            if (n < 0) DiagLog.once("featfail:$id:${msg[0]}") { "$label: feature report 0x%02x FAILED".format(msg[0].toInt() and 0xFF) }
+            return n >= 0
         }
 
         override fun sendOutput(report: ByteArray): Boolean {
@@ -155,8 +170,14 @@ class UsbControllerManager(private val context: Context, private val listener: C
         fun startReading() {
             running = true
             // A cabled 2015 controller has exactly one Valve interface; everything else waits for input.
-            if (model == ControllerModel.SC2015 && !kind.dongle) markConnected()
-            else if (model == ControllerModel.SC2015) sendFeature(Sc2015Protocol.clearDigitalMappings())
+            if (model == ControllerModel.SC2015 && !kind.dongle) {
+                markConnected()
+            } else if (model == ControllerModel.SC2015) {
+                // Like SDL: ask the receiver whether a controller is on this slot; it answers with a
+                // wireless event. Also configure right away, which makes it send full state reports.
+                sendFeature(Sc2015Protocol.getWirelessState())
+                configure(gyro = false, ledBrightness = 50)
+            }
             thread = Thread({ readLoop() }, "usb-$id").apply { isDaemon = true; start() }
         }
 
@@ -167,6 +188,7 @@ class UsbControllerManager(private val context: Context, private val listener: C
 
         private fun markConnected() {
             if (!connected) {
+                DiagLog.log("$label: connected")
                 connected = true
                 listener.onControllerConnected(this)
             }
@@ -174,6 +196,7 @@ class UsbControllerManager(private val context: Context, private val listener: C
 
         private fun markDisconnected() {
             if (connected) {
+                DiagLog.log("$label: disconnected")
                 connected = false
                 listener.onControllerDisconnected(this)
             }
@@ -186,9 +209,13 @@ class UsbControllerManager(private val context: Context, private val listener: C
                 val n = connection.bulkTransfer(epIn, buf, buf.size, 500)
                 if (n <= 0) {
                     // Timeouts are normal when idle; repeated hard errors mean the device is gone.
-                    if (n < 0 && ++errors > 200) break
+                    if (n < 0 && ++errors > 200) {
+                        DiagLog.log("$label: read failing, giving up on interface ${iface.id}")
+                        break
+                    }
                     continue
                 }
+                DiagLog.once("pkt:$id:${buf[0]}:${buf[2]}") { "$label if${iface.id}: first packet ${DiagLog.hex(buf, n)}" }
                 errors = 0
                 if (model == ControllerModel.SC2026) handle2026(buf, n) else handle2015(buf, n)
             }
@@ -200,10 +227,9 @@ class UsbControllerManager(private val context: Context, private val listener: C
                     markConnected()
                     listener.onControllerState(this)
                 }
-                Sc2015Protocol.REPORT_WIRELESS -> when (buf[4].toInt()) {
-                    1 -> markDisconnected()
-                    2 -> markConnected()
-                }
+                // 1 = disconnected, 2 = connected, 3 = newly paired.
+                Sc2015Protocol.REPORT_WIRELESS ->
+                    if (buf[4].toInt() == Sc2015Protocol.WIRELESS_DISCONNECTED) markDisconnected() else markConnected()
             }
         }
 
@@ -225,7 +251,6 @@ class UsbControllerManager(private val context: Context, private val listener: C
     }
 
     companion object {
-        private const val TAG = "UsbController"
         const val ACTION_PERMISSION = "dev.scmapper.USB_PERMISSION"
         const val VENDOR_VALVE = 0x28DE
 

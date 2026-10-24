@@ -19,6 +19,7 @@ import android.os.SystemClock
 import android.util.Log
 import android.widget.Toast
 import dev.scmapper.App
+import dev.scmapper.DiagLog
 import dev.scmapper.R
 import dev.scmapper.controller.BleControllerManager
 import dev.scmapper.controller.ControllerLink
@@ -87,6 +88,7 @@ class BridgeService : Service(), ControllerListener {
             val nanos = System.nanoTime()
             lastStepNanos = nanos
             mapper.process(work, SystemClock.uptimeMillis(), nanos)
+            if (work.buttons != 0) DiagLog.once("input:${link.id}") { "${link.label}: input received (${work.describe().lineSequence().first()})" }
             if (!menuOpen) hub.submit(slot, mapper.frame)
         }
 
@@ -131,6 +133,7 @@ class BridgeService : Service(), ControllerListener {
             return
         }
         lastStartError = null
+        DiagLog.log("Service started (SC Mapper ${dev.scmapper.BuildConfig.VERSION_NAME}, Android ${Build.VERSION.RELEASE})")
         instance = this
         engineThread = HandlerThread("engine", Process.THREAD_PRIORITY_URGENT_DISPLAY).apply { start() }
         engine = Handler(engineThread.looper)
@@ -209,6 +212,7 @@ class BridgeService : Service(), ControllerListener {
         } catch (e: Exception) {
             Log.e(TAG, "Cannot start in foreground", e)
             lastStartError = e.message ?: e.toString()
+            DiagLog.log("Service could not start: $lastStartError")
             false
         }
     }
@@ -240,6 +244,8 @@ class BridgeService : Service(), ControllerListener {
         entries[link.id] = e
         engine.post {
             e.slot = (0..15).first { s -> entries.values.none { it !== e && it.slot == s } }
+            DiagLog.log("${link.label}: player ${e.slot + 1}, profile \"${activeProfile.name}\"")
+            DiagLog.forget("input:${link.id}")
             e.mapper.profile = activeProfile.copy()
             e.mapper.gyroEnabled = gyroEnabled
             hub.ensureGamepad(e.slot)
@@ -317,10 +323,11 @@ class BridgeService : Service(), ControllerListener {
             configure(e)
         }
         main.post { updateNotification() }
-        if (changedName) Log.i(TAG, "Active profile: ${p.name}")
+        if (changedName) DiagLog.log("Active profile: ${p.name}")
     }
 
     private fun onSpecial(e: Entry, s: Special) {
+        DiagLog.log("Shortcut: ${s.label}")
         when (s) {
             Special.NEXT_PROFILE, Special.PREV_PROFILE -> {
                 val names = app.profiles.names()

@@ -9,6 +9,7 @@ import android.os.IBinder
 import android.os.Parcel
 import android.util.Log
 import dev.scmapper.BuildConfig
+import dev.scmapper.DiagLog
 import rikka.shizuku.Shizuku
 
 /**
@@ -70,6 +71,7 @@ class VirtualDevices(private val context: Context, private val onOutput: (id: In
             val ok = call(UhidProtocol.TX_SET_CALLBACK) { it.writeStrongBinder(callback) } != null
             if (ok) {
                 status = Status.READY
+                DiagLog.log("Shizuku helper ready")
                 lastError = null
                 onReady?.invoke()
             }
@@ -114,14 +116,17 @@ class VirtualDevices(private val context: Context, private val onOutput: (id: In
     /** (Re)binds the helper; asks for Shizuku permission if needed. */
     fun bind() {
         if (!Shizuku.pingBinder()) {
+            DiagLog.once("shizuku:missing") { "Shizuku is not running" }
             status = Status.SHIZUKU_MISSING
             return
         }
+        DiagLog.forget("shizuku:missing")
         if (Shizuku.isPreV11()) {
             fail("Shizuku is too old, please update it")
             return
         }
         if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
+            DiagLog.once("shizuku:perm") { "Shizuku permission not granted yet" }
             status = Status.NO_PERMISSION
             return
         }
@@ -153,6 +158,7 @@ class VirtualDevices(private val context: Context, private val onOutput: (id: In
             return false
         }
         synchronized(created) { created += id }
+        DiagLog.log("Virtual device created: $name")
         return true
     }
 
@@ -215,7 +221,7 @@ class VirtualDevices(private val context: Context, private val onOutput: (id: In
     }
 
     private fun fail(message: String) {
-        Log.w(TAG, message)
+        DiagLog.log("Helper error: $message")
         lastError = message
         status = Status.ERROR
     }

@@ -374,6 +374,8 @@ class MainActivity : Activity() {
             }
         }
 
+        f.button("Diagnostics (log for troubleshooting)") { startActivity(Intent(this, DiagnosticsActivity::class.java)) }
+
         f.header("Controller shortcuts")
         f.note(
             "Steam + RB / LB — next / previous profile\n" +

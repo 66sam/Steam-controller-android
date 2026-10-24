@@ -75,6 +75,31 @@ class ProtocolTest {
     }
 
     @Test
+    fun usb2015ReceiverStateFormat() {
+        // Type 7: same as type 1 up to the pads, then IMU data type + 4 shorts.
+        val b = usbState(Sc2015Protocol.W_B or Sc2015Protocol.W_STEAM, 1234, 0)
+        b[2] = Sc2015Protocol.REPORT_BLE_STATE.toByte()
+        b[24] = 3 // gyro
+        s16(b, 25, 7); s16(b, 27, 8); s16(b, 29, 9)
+        val s = RawState()
+        assertEquals(Sc2015Protocol.REPORT_STATE, Sc2015Protocol.parseUsb(b, 64, s))
+        assertTrue(s.pressed(Btn.B))
+        assertTrue(s.pressed(Btn.STEAM))
+        assertEquals(1234, s.stickX)
+        assertEquals(7, s.gyroX)
+        assertEquals(9, s.gyroZ)
+    }
+
+    @Test
+    fun configureSetsWirelessPacketVersion() {
+        val m = Sc2015Protocol.configure(gyro = false, ble = false)
+        assertEquals(0x87, m[0].toInt() and 0xFF)
+        val regs = (0 until (m[1].toInt() / 3)).associate { m[2 + it * 3].toInt() to ((m[3 + it * 3].toInt() and 0xFF) or (m[4 + it * 3].toInt() shl 8)) }
+        assertEquals(2, regs[Sc2015Protocol.SETTING_WIRELESS_PACKET_VERSION])
+        assertEquals(Sc2015Protocol.TRACKPAD_NONE, regs[Sc2015Protocol.SETTING_RIGHT_TRACKPAD_MODE])
+    }
+
+    @Test
     fun ble2015Chunks() {
         val s = RawState()
         // Report type 4 with buttons, triggers and right pad chunks.

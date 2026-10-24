@@ -13,7 +13,7 @@ import android.content.Context
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
+import dev.scmapper.DiagLog
 import java.util.ArrayDeque
 import java.util.UUID
 
@@ -84,6 +84,7 @@ class BleControllerManager(private val context: Context, private val listener: C
         }
 
         fun connect() {
+            DiagLog.log("BLE ${safeName(device)}: connecting")
             gatt = if (Build.VERSION.SDK_INT >= 26) device.connectGatt(context, true, callback, BluetoothDevice.TRANSPORT_LE)
             else device.connectGatt(context, true, callback)
         }
@@ -194,6 +195,7 @@ class BleControllerManager(private val context: Context, private val listener: C
         private val callback = object : BluetoothGattCallback() {
             override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
                 if (closed) return
+                DiagLog.log("BLE ${safeName(device)}: state $newState (status $status)")
                 if (newState == BluetoothProfile.STATE_CONNECTED) {
                     g.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)
                     main.postDelayed({ if (!closed) g.discoverServices() }, 300)
@@ -205,10 +207,16 @@ class BleControllerManager(private val context: Context, private val listener: C
             }
 
             override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
+                DiagLog.log(
+                    "BLE ${safeName(device)}: services " + g.services.joinToString { svc ->
+                        svc.uuid.toString().substring(4, 8) + "[" + svc.characteristics.joinToString(" ") { it.uuid.toString().substring(4, 8) } + "]"
+                    }
+                )
                 if (!findCharacteristics(g)) {
-                    Log.w(TAG, "Valve service not found on ${device.address}; for the 2015 controller install the BLE firmware")
+                    DiagLog.log("BLE ${safeName(device)}: Valve service not found (2015 controller: is the BLE firmware installed?)")
                     return
                 }
+                DiagLog.log("BLE ${safeName(device)}: ${model.title}")
                 val input = inputChar ?: return
                 // Larger MTU for the 2026 controller's long reports.
                 enqueue { g.requestMtu(247) }
@@ -267,6 +275,7 @@ class BleControllerManager(private val context: Context, private val listener: C
             private fun onNotify(c: BluetoothGattCharacteristic, value: ByteArray?) {
                 val l = link ?: return
                 if (value == null || c.uuid != inputChar?.uuid) return
+                DiagLog.once("ble:${device.address}:first") { "BLE ${safeName(device)}: first notification ${DiagLog.hex(value)}" }
                 val ok = if (model == ControllerModel.SC2026) {
                     val report = ByteArray(value.size + 1)
                     report[0] = inputReportId.toByte()
@@ -276,6 +285,7 @@ class BleControllerManager(private val context: Context, private val listener: C
                     Sc2015Protocol.parseBle(value, l.state)
                 }
                 if (ok) listener.onControllerState(l)
+                else DiagLog.once("ble:${device.address}:bad:${value.firstOrNull()}") { "BLE ${safeName(device)}: unrecognised notification ${DiagLog.hex(value)}" }
             }
         }
     }
@@ -288,7 +298,6 @@ class BleControllerManager(private val context: Context, private val listener: C
     }
 
     companion object {
-        private const val TAG = "BleController"
         private val CCCD: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
         private val BATTERY_SERVICE: UUID = UUID.fromString("0000180f-0000-1000-8000-00805f9b34fb")
         private val BATTERY_LEVEL: UUID = UUID.fromString("00002a19-0000-1000-8000-00805f9b34fb")
