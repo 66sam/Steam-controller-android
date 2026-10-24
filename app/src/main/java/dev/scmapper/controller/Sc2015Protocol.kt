@@ -93,6 +93,11 @@ object Sc2015Protocol {
     private const val BLE_CHUNK_GYRO = 0x0800
     private const val BLE_CHUNK_QUAT = 0x1000
     private const val BLE_SEGMENT_PAYLOAD = 18
+    /**
+     * Valve's Android code writes 18 byte segments (header + 17 bytes): it sends a 20 byte buffer
+     * minus the report number and the last byte. Matched exactly.
+     */
+    private const val BLE_WRITE_PAYLOAD = 17
 
     /** Steam rotates the raw pad coordinates by 15° (left pad -15°, right pad +15°). */
     private const val PAD_ROTATION_RAD = 0.261799
@@ -296,15 +301,15 @@ object Sc2015Protocol {
     /** Pads a feature message to the 64 byte USB feature report (report id 0). */
     fun usbFeature(msg: ByteArray): ByteArray = msg.copyOf(64)
 
-    /** Splits a feature message into BLE report-characteristic writes (segmented, 19 bytes each). */
+    /** Splits a feature message into BLE report-characteristic writes (segmented, 18 bytes each). */
     fun bleSegments(msg: ByteArray): List<ByteArray> {
         val out = ArrayList<ByteArray>()
         var offset = 0
         var segment = 0
         do {
-            val n = minOf(BLE_SEGMENT_PAYLOAD, msg.size - offset)
+            val n = minOf(BLE_WRITE_PAYLOAD, msg.size - offset)
             val last = offset + n >= msg.size
-            val packet = ByteArray(1 + BLE_SEGMENT_PAYLOAD)
+            val packet = ByteArray(1 + BLE_WRITE_PAYLOAD)
             packet[0] = (0x80 or segment or (if (last) 0x40 else 0)).toByte()
             System.arraycopy(msg, offset, packet, 1, n)
             out += packet

@@ -159,9 +159,9 @@ class ProtocolTest {
     fun ble2015Segmentation() {
         val msg = Sc2015Protocol.configure(gyro = true, ble = true)
         val segs = Sc2015Protocol.bleSegments(msg)
-        assertEquals(if (msg.size > 18) 2 else 1, segs.size)
+        assertEquals((msg.size + 16) / 17, segs.size)
         for ((i, seg) in segs.withIndex()) {
-            assertEquals(19, seg.size)
+            assertEquals(18, seg.size)
             assertEquals(0x80 or i or (if (i == segs.size - 1) 0x40 else 0), seg[0].toInt() and 0xFF)
         }
         val joined = segs.flatMap { it.drop(1) }.take(msg.size).toByteArray()

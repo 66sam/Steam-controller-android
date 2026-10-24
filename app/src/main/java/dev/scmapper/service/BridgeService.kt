@@ -28,6 +28,7 @@ import dev.scmapper.controller.ControllerModel
 import dev.scmapper.controller.GenericControllerManager
 import dev.scmapper.controller.RawState
 import dev.scmapper.controller.UsbControllerManager
+import dev.scmapper.mapping.ControlPart
 import dev.scmapper.mapping.GyroMode
 import dev.scmapper.mapping.Mapper
 import dev.scmapper.mapping.MapperHost
@@ -83,8 +84,19 @@ class BridgeService : Service(), ControllerListener {
         val scheduled = AtomicBoolean(false)
         var lastStepNanos = 0L
 
+        private var capturedParts: Set<ControlPart> = emptySet()
+
         fun step() {
             synchronized(pending) { work.copyFrom(pending) }
+            val cap = capture
+            if (cap != null) {
+                // Visual mapper is choosing a control: report newly used parts, map nothing.
+                val now = ControlPart.active(work)
+                for (p in now - capturedParts) main.post { cap(p) }
+                capturedParts = now
+                return
+            }
+            capturedParts = emptySet()
             val nanos = System.nanoTime()
             lastStepNanos = nanos
             mapper.process(work, SystemClock.uptimeMillis(), nanos)
@@ -362,6 +374,20 @@ class BridgeService : Service(), ControllerListener {
     }
 
     // ------------------------------------------------------------------ API for the UI
+
+    /** While set, controller input isn't mapped; each newly used control is reported instead (main thread). */
+    @Volatile private var capture: ((ControlPart) -> Unit)? = null
+
+    fun setCapture(listener: ((ControlPart) -> Unit)?) {
+        capture = listener
+        if (listener != null) engine.post { hub.releaseAll() }
+    }
+
+    /** Model and latest input of the first connected controller, for the visual mapper. */
+    fun liveController(): Pair<ControllerModel, RawState>? =
+        entries.values.filter { it.slot >= 0 }.minByOrNull { it.slot }?.let { e ->
+            e.link.model to synchronized(e.pending) { e.pending.copy() }
+        }
 
     class ControllerInfo(val id: String, val label: String, val slot: Int, val battery: Int, val model: ControllerModel)
 

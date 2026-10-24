@@ -90,13 +90,37 @@ class MainActivity : Activity() {
             if (Build.VERSION.SDK_INT >= 31) add(Manifest.permission.BLUETOOTH_CONNECT)
             if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
         }.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
-        if (wanted.isEmpty()) startBridge()
-        else requestPermissions(wanted.toTypedArray(), REQ_PERMISSIONS)
+        if (wanted.isEmpty()) {
+            startBridge()
+            askForOverlayOnce()
+        } else {
+            requestPermissions(wanted.toTypedArray(), REQ_PERMISSIONS)
+        }
+    }
+
+    /** The on-controller profile menu draws over games; ask for that once, on first launch. */
+    private fun askForOverlayOnce() {
+        if (Settings.canDrawOverlays(this) || app.settings.askedOverlay) return
+        app.settings.askedOverlay = true
+        AlertDialog.Builder(this)
+            .setTitle("Show the profile menu over games?")
+            .setMessage(
+                "SC Mapper can show a profile menu on top of whatever you're playing (Steam + ◀/▶, or … on the " +
+                    "2026 controller). Android needs you to allow \"Display over other apps\" for that."
+            )
+            .setPositiveButton("Allow") { _, _ ->
+                startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+            }
+            .setNegativeButton("Not now", null)
+            .show()
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == REQ_PERMISSIONS) startBridge()
+        if (requestCode == REQ_PERMISSIONS) {
+            startBridge()
+            askForOverlayOnce()
+        }
     }
 
     private fun startBridge(action: String? = null) {
@@ -271,7 +295,7 @@ class MainActivity : Activity() {
             }
         }
         f.buttons(
-            "Edit active" to { edit(app.profiles.activeName) },
+            "Open mapper" to { edit(app.profiles.activeName) },
             "New profile" to { newProfile() },
         )
         f.buttons(
@@ -296,8 +320,9 @@ class MainActivity : Activity() {
         return parts.joinToString(" · ")
     }
 
+    /** Opens the visual mapper; its "All settings" button leads to the full list editor. */
     private fun edit(name: String) {
-        startActivity(Intent(this, ProfileEditorActivity::class.java).putExtra(ProfileEditorActivity.EXTRA_NAME, name))
+        startActivity(Intent(this, MapperActivity::class.java).putExtra(MapperActivity.EXTRA_NAME, name))
     }
 
     private fun newProfile() {

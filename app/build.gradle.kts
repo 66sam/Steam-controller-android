@@ -11,8 +11,8 @@ android {
         applicationId = "dev.scmapper"
         minSdk = 26
         targetSdk = 34
-        versionCode = 4
-        versionName = "0.2.2"
+        versionCode = 5
+        versionName = "0.3.0"
     }
 
     // A fixed key kept in the repo, so every build (local or CI) can be installed as an update

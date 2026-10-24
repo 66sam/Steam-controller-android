@@ -32,6 +32,10 @@ class Settings(context: Context) {
         else prefs.edit().putString("map:$key", m.toJson().toString()).apply()
     }
 
+    var askedOverlay: Boolean
+        get() = prefs.getBoolean("askedOverlay", false)
+        set(value) = prefs.edit().putBoolean("askedOverlay", value).apply()
+
     /** Show a toast when switching profiles with the controller. */
     var toasts: Boolean
         get() = prefs.getBoolean("toasts", true)

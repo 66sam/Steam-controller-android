@@ -176,6 +176,21 @@ class MapperTest {
     }
 
     @Test
+    fun trackpadStickHaptics() {
+        mapper.profile = Presets.gamepad() // right pad = right stick
+        s.buttons = Btn.RPAD_TOUCH.bit
+        s.rpadX = 0; s.rpadY = 0
+        step()
+        assertEquals("tick when the thumb lands", 1, host.haptics)
+        for (i in 1..10) { s.rpadX = i * 3000; step() }
+        assertTrue("ticks while moving and a bump at the edge, got ${host.haptics}", host.haptics >= 4)
+        val before = host.haptics
+        s.buttons = 0
+        step()
+        assertEquals(before, host.haptics)
+    }
+
+    @Test
     fun rightStickAndDpadButtons2026() {
         mapper.profile = Presets.gamepad()
         s.rstickX = 0; s.rstickY = 32767

@@ -58,6 +58,11 @@ class ProfileEditorActivity : Activity() {
         title = profile.name
         val f = form
         f.clear()
+        intent.getStringExtra(EXTRA_SECTION)?.let { section ->
+            renderSection(section)
+            scroll.post { scroll.scrollTo(0, y) }
+            return
+        }
         f.header(profile.name)
         val active = app.profiles.activeName == profile.name
         f.note(if (active) "This profile is active — changes apply immediately." else "Not active.")
@@ -113,6 +118,22 @@ class ProfileEditorActivity : Activity() {
         scroll.post { scroll.scrollTo(0, y) }
     }
 
+    /** Just one part of the profile, opened from the visual mapper. */
+    private fun renderSection(section: String) {
+        val f = form
+        when (section) {
+            SECTION_LT -> { f.header("Left trigger"); trigger("", profile.leftTrigger) }
+            SECTION_RT -> { f.header("Right trigger"); trigger("", profile.rightTrigger) }
+            SECTION_LSTICK -> { f.header("Left stick"); surface(profile.stick, isStick = true) }
+            SECTION_RSTICK -> { f.header("Right stick"); surface(profile.rightStick, isStick = true) }
+            SECTION_LPAD -> { f.header("Left trackpad"); surface(profile.leftPad, isStick = false) }
+            SECTION_RPAD -> { f.header("Right trackpad"); surface(profile.rightPad, isStick = false) }
+            SECTION_GYRO -> { f.header("Gyro"); gyro(profile.gyro) }
+        }
+        f.note("Changes are saved and applied immediately.")
+        f.button("Done") { finish() }
+    }
+
     private fun editButton(b: Btn) {
         val binding = profile.binding(b)
         val items = arrayOf(
@@ -133,7 +154,7 @@ class ProfileEditorActivity : Activity() {
 
     private fun trigger(label: String, t: TriggerConfig) {
         val f = form
-        f.subheader(label)
+        if (label.isNotEmpty()) f.subheader(label)
         f.choice("Analog output", TriggerTarget.entries.toList(), t.analog, { it.label }) { t.analog = it; save(true) }
         f.action("Soft pull action", t.softAction) { t.softAction = it; save(true) }
         if (!t.softAction.isNone) {
@@ -297,6 +318,14 @@ class ProfileEditorActivity : Activity() {
 
     companion object {
         const val EXTRA_NAME = "name"
+        const val EXTRA_SECTION = "section"
+        const val SECTION_LT = "lt"
+        const val SECTION_RT = "rt"
+        const val SECTION_LSTICK = "lstick"
+        const val SECTION_RSTICK = "rstick"
+        const val SECTION_LPAD = "lpad"
+        const val SECTION_RPAD = "rpad"
+        const val SECTION_GYRO = "gyro"
         private const val REQ_EXPORT = 1
     }
 }

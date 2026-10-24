@@ -104,6 +104,8 @@ class Mapper(private val host: MapperHost) {
         var angle = 0f
         var hasAngle = false
         var angleAcc = 0f
+        var joyActive = false
+        var atEdge = false
     }
 
     private class Pulse(val action: Action, val until: Long, val key: String)
@@ -112,6 +114,7 @@ class Mapper(private val host: MapperHost) {
         buttonRt.clear()
         for (rt in listOf(stickRt, rstickRt, lpadRt, rpadRt)) {
             rt.wasTouched = false; rt.vx = 0f; rt.vy = 0f; rt.zone = -1; rt.hasAngle = false; rt.angleAcc = 0f
+            rt.joyActive = false; rt.atEdge = false
         }
         pulses.clear()
         edgeNext.clear()
@@ -313,11 +316,14 @@ class Mapper(private val host: MapperHost) {
 
         when (cfg.mode) {
             SurfaceMode.NONE -> {}
-            SurfaceMode.JOYSTICK -> if (active && mag > cfg.deadzone) {
-                val scaled = min(1f, (mag - cfg.deadzone) / (1f - cfg.deadzone) * cfg.sensitivity)
-                val ox = x / mag * scaled
-                val oy = (y / mag * scaled) * if (cfg.invertY) -1f else 1f
-                addStick(cfg.target, ox, oy)
+            SurfaceMode.JOYSTICK -> {
+                if (active && mag > cfg.deadzone) {
+                    val scaled = min(1f, (mag - cfg.deadzone) / (1f - cfg.deadzone) * cfg.sensitivity)
+                    val ox = x / mag * scaled
+                    val oy = (y / mag * scaled) * if (cfg.invertY) -1f else 1f
+                    addStick(cfg.target, ox, oy)
+                }
+                if (hapticsOn) joystickHaptics(rt, active, x, y, mag, right)
             }
             SurfaceMode.DIRECTIONAL -> {
                 var zone = -1
@@ -348,6 +354,33 @@ class Mapper(private val host: MapperHost) {
 
         if (!isStick && clicked && !(zoneMode && cfg.requireClick)) apply(cfg.clickAction, "$key:click")
         if (cfg.mode != SurfaceMode.MOUSE) rt.wasTouched = touched
+    }
+
+    /**
+     * Trackpad used as a stick: a tick when the thumb lands, light ticks as it travels (so you can
+     * feel how far you moved) and a firmer bump when it reaches the outer edge (full deflection).
+     */
+    private fun joystickHaptics(rt: SurfaceRt, active: Boolean, x: Float, y: Float, mag: Float, right: Boolean) {
+        if (!active) {
+            rt.joyActive = false
+            rt.atEdge = false
+            return
+        }
+        if (!rt.joyActive) {
+            rt.joyActive = true
+            rt.px = x; rt.py = y; rt.dist = 0f
+            hapticScaled(right, 600, 0, 1)
+            return
+        }
+        rt.dist += hypot(x - rt.px, y - rt.py)
+        rt.px = x; rt.py = y
+        if (rt.dist >= JOYSTICK_TICK_TRAVEL) {
+            rt.dist = 0f
+            hapticScaled(right, 250, 0, 1)
+        }
+        val edge = mag >= 0.92f
+        if (edge && !rt.atEdge) hapticScaled(right, 1200, 0, 1)
+        rt.atEdge = edge
     }
 
     /** Bitmask of up(1) down(2) left(4) right(8). Eight-way overlaps adjacent directions on diagonals. */
@@ -663,6 +696,8 @@ class Mapper(private val host: MapperHost) {
         const val PAD_MOUSE_PX = 700f
         const val STICK_MOUSE_PX_PER_S = 1600f
         const val MOUSE_TICK_PX = 40f
+        /** Pad travel (in pad half-widths) between haptic ticks in stick mode. */
+        const val JOYSTICK_TICK_TRAVEL = 0.2f
         const val GYRO_LSB_PER_DPS = 16.4f
         const val GYRO_PX_PER_DEG = 12f
         const val GYRO_STICK_FULL_DPS = 220f

@@ -246,7 +246,14 @@ class BleControllerManager(private val context: Context, private val listener: C
 
             override fun onDescriptorWrite(g: BluetoothGatt, d: BluetoothGattDescriptor, status: Int) = opDone()
 
-            override fun onCharacteristicWrite(g: BluetoothGatt, c: BluetoothGattCharacteristic, status: Int) = opDone()
+            override fun onCharacteristicWrite(g: BluetoothGatt, c: BluetoothGattCharacteristic, status: Int) {
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    DiagLog.once("ble:${device.address}:writefail:$status") { "BLE ${safeName(device)}: controller rejected a write (status $status)" }
+                } else {
+                    DiagLog.once("ble:${device.address}:writeok") { "BLE ${safeName(device)}: settings/haptics writes accepted" }
+                }
+                opDone()
+            }
 
             @Deprecated("Deprecated in API 33")
             @Suppress("DEPRECATION")
