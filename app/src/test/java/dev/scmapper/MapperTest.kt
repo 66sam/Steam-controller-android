@@ -191,6 +191,23 @@ class MapperTest {
     }
 
     @Test
+    fun clickDpadTicksWhileTouching() {
+        mapper.profile = Presets.gamepad() // left pad = d-pad that needs a click
+        s.buttons = Btn.LPAD_TOUCH.bit
+        s.lpadX = 0; s.lpadY = 30000
+        step()
+        assertFalse(mapper.frame.has(GamepadOut.DPAD_UP)) // not clicked: no output
+        assertEquals("tick on entering a zone", 1, host.haptics)
+        s.lpadX = 30000; s.lpadY = 0
+        step()
+        assertEquals("tick on moving to another zone", 2, host.haptics)
+        s.buttons = Btn.LPAD_TOUCH.bit or Btn.LPAD_CLICK.bit
+        step()
+        assertTrue(mapper.frame.has(GamepadOut.DPAD_RIGHT))
+        assertEquals("firm pulse on click", 3, host.haptics)
+    }
+
+    @Test
     fun rightStickAndDpadButtons2026() {
         mapper.profile = Presets.gamepad()
         s.rstickX = 0; s.rstickY = 32767

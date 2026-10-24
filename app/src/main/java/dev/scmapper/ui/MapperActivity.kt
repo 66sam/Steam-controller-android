@@ -130,6 +130,15 @@ class MapperActivity : Activity() {
         view.labels = { shortLabel(it) }
         (status.parent as? LinearLayout)?.removeView(status)
         f.container.addView(status)
+        f.slider("Haptic strength", 0f, 200f, 5f, profile.hapticStrength.toFloat(), { "${it.toInt()}%" }) {
+            profile.hapticStrength = it.toInt()
+            save()
+            if (profileName == app.profiles.activeName) handler.postDelayed({ BridgeService.instance?.testHaptics() }, 150)
+        }
+        f.buttons(
+            "Test haptics" to { BridgeService.instance?.testHaptics() },
+            "Haptics per pad…" to { pickPadHaptics() },
+        )
         f.check("Select controls by pressing them on the controller", listening) {
             listening = it
             updateCapture()
@@ -224,6 +233,20 @@ class MapperActivity : Activity() {
             .setNegativeButton(android.R.string.cancel, null)
             .setOnDismissListener { dialog = null }
             .show()
+    }
+
+    /** Per-trackpad on/off, as in the pad settings. */
+    private fun pickPadHaptics() {
+        val names = arrayOf("Left trackpad", "Right trackpad")
+        val checked = booleanArrayOf(profile.leftPad.haptics, profile.rightPad.haptics)
+        AlertDialog.Builder(this).setTitle("Haptic feedback")
+            .setMultiChoiceItems(names, checked) { _, which, on -> checked[which] = on }
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                profile.leftPad.haptics = checked[0]
+                profile.rightPad.haptics = checked[1]
+                save()
+            }
+            .setNegativeButton(android.R.string.cancel, null).show()
     }
 
     private fun quickAssign() {

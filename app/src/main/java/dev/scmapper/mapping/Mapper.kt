@@ -104,6 +104,7 @@ class Mapper(private val host: MapperHost) {
         var angle = 0f
         var hasAngle = false
         var angleAcc = 0f
+        var zoneFiring = false
         var joyActive = false
         var atEdge = false
     }
@@ -326,27 +327,33 @@ class Mapper(private val host: MapperHost) {
                 if (hapticsOn) joystickHaptics(rt, active, x, y, mag, right)
             }
             SurfaceMode.DIRECTIONAL -> {
+                // The zone under the thumb is tracked while touching, so moving between directions
+                // can be felt even when the pad only fires on click.
                 var zone = -1
-                if (active) {
+                var dirs = 0
+                if (touched) {
                     if (mag < cfg.deadzone) {
-                        if (!cfg.centerAction.isNone) { apply(cfg.centerAction, "$key:center"); zone = 16 }
+                        if (!cfg.centerAction.isNone) zone = 16
                     } else {
-                        val dirs = directions(x, y, cfg.eightWay)
-                        for (i in 0 until 4) if (dirs and (1 shl i) != 0) apply(cfg.dirActions[i], "$key:dir$i")
+                        dirs = directions(x, y, cfg.eightWay)
                         zone = dirs
                     }
                 }
-                zoneHaptic(rt, zone, hapticsOn, right)
+                if (active) {
+                    if (zone == 16) apply(cfg.centerAction, "$key:center")
+                    for (i in 0 until 4) if (dirs and (1 shl i) != 0) apply(cfg.dirActions[i], "$key:dir$i")
+                }
+                zoneHaptic(rt, zone, active && zone >= 0, hapticsOn, right)
             }
             SurfaceMode.GRID -> {
                 var zone = -1
-                if (active) {
+                if (touched) {
                     val col = floor((x + 1f) / 2f * cfg.cols).toInt().coerceIn(0, cfg.cols - 1)
                     val row = floor((1f - y) / 2f * cfg.rows).toInt().coerceIn(0, cfg.rows - 1)
                     zone = row * cfg.cols + col
-                    apply(cfg.gridActions[zone], "$key:grid$zone")
                 }
-                zoneHaptic(rt, zone, hapticsOn, right)
+                if (active && zone >= 0) apply(cfg.gridActions[zone], "$key:grid$zone")
+                zoneHaptic(rt, zone, active && zone >= 0, hapticsOn, right)
             }
             SurfaceMode.MOUSE -> if (isStick) stickMouse(cfg, x, y, mag, dt) else padMouse(cfg, rt, x, y, touched, dt, right)
             SurfaceMode.SCROLL -> scrollWheel(cfg, rt, x, y, mag, touched, key, nowMs, hapticsOn, right)
@@ -369,17 +376,17 @@ class Mapper(private val host: MapperHost) {
         if (!rt.joyActive) {
             rt.joyActive = true
             rt.px = x; rt.py = y; rt.dist = 0f
-            hapticScaled(right, 600, 0, 1)
+            hapticScaled(right, HAPTIC_TICK, 0, 1)
             return
         }
         rt.dist += hypot(x - rt.px, y - rt.py)
         rt.px = x; rt.py = y
         if (rt.dist >= JOYSTICK_TICK_TRAVEL) {
             rt.dist = 0f
-            hapticScaled(right, 250, 0, 1)
+            hapticScaled(right, HAPTIC_LIGHT, 0, 1)
         }
         val edge = mag >= 0.92f
-        if (edge && !rt.atEdge) hapticScaled(right, 1200, 0, 1)
+        if (edge && !rt.atEdge) hapticScaled(right, HAPTIC_FIRM, 0, 1)
         rt.atEdge = edge
     }
 
@@ -399,11 +406,14 @@ class Mapper(private val host: MapperHost) {
         return m
     }
 
-    private fun zoneHaptic(rt: SurfaceRt, zone: Int, enabled: Boolean, right: Boolean) {
-        if (zone != rt.zone) {
-            if (enabled && zone >= 0) hapticScaled(right, 900, 0, 1)
-            rt.zone = zone
+    /** A tick when the thumb moves into another zone, and a firmer one when a zone fires. */
+    private fun zoneHaptic(rt: SurfaceRt, zone: Int, firing: Boolean, enabled: Boolean, right: Boolean) {
+        if (enabled) {
+            if (firing && !rt.zoneFiring) hapticScaled(right, HAPTIC_FIRM, 0, 1)
+            else if (zone != rt.zone && zone >= 0) hapticScaled(right, HAPTIC_TICK, 0, 1)
         }
+        rt.zone = zone
+        rt.zoneFiring = firing
     }
 
     private fun stickMouse(cfg: SurfaceConfig, x: Float, y: Float, mag: Float, dt: Float) {
@@ -434,7 +444,7 @@ class Mapper(private val host: MapperHost) {
                     rt.dist += hypot(dx, dy)
                     if (rt.dist >= MOUSE_TICK_PX) {
                         rt.dist = 0f
-                        hapticScaled(right, 250, 0, 1)
+                        hapticScaled(right, HAPTIC_LIGHT, 0, 1)
                     }
                 }
             } else {
@@ -471,12 +481,12 @@ class Mapper(private val host: MapperHost) {
             while (rt.angleAcc >= step) {
                 rt.angleAcc -= step
                 fireOnce(cfg.scrollCcw, "$key:ccw", nowMs)
-                if (haptics) hapticScaled(right, 400, 0, 1)
+                if (haptics) hapticScaled(right, HAPTIC_TICK, 0, 1)
             }
             while (rt.angleAcc <= -step) {
                 rt.angleAcc += step
                 fireOnce(cfg.scrollCw, "$key:cw", nowMs)
-                if (haptics) hapticScaled(right, 400, 0, 1)
+                if (haptics) hapticScaled(right, HAPTIC_TICK, 0, 1)
             }
         }
         rt.angle = ang
@@ -647,8 +657,8 @@ class Mapper(private val host: MapperHost) {
 
     /** Confirmation buzz for shortcuts: [n] short pulses on both pads. */
     fun confirm(n: Int) {
-        hapticScaled(true, 1500, 40_000, n)
-        hapticScaled(false, 1500, 40_000, n)
+        hapticScaled(true, HAPTIC_FIRM, 40_000, n)
+        hapticScaled(false, HAPTIC_FIRM, 40_000, n)
     }
 
     private fun processRumble(nowMs: Long) {
@@ -664,7 +674,7 @@ class Mapper(private val host: MapperHost) {
         if (nowMs < nextRumble) return
         nextRumble = nowMs + RUMBLE_INTERVAL_MS
         rumbleActive = true
-        host.rumble(rumbleStrong * k, rumbleWeak * k)
+        host.rumble(min(1f, rumbleStrong * k), min(1f, rumbleWeak * k))
     }
 
     // ---------------------------------------------------------------- on-screen menu
@@ -698,6 +708,11 @@ class Mapper(private val host: MapperHost) {
         const val MOUSE_TICK_PX = 40f
         /** Pad travel (in pad half-widths) between haptic ticks in stick mode. */
         const val JOYSTICK_TICK_TRAVEL = 0.2f
+
+        // Pulse "on" times in µs at 100% strength (the profile's strength scales them, up to 200%).
+        const val HAPTIC_LIGHT = 500
+        const val HAPTIC_TICK = 1100
+        const val HAPTIC_FIRM = 2200
         const val GYRO_LSB_PER_DPS = 16.4f
         const val GYRO_PX_PER_DEG = 12f
         const val GYRO_STICK_FULL_DPS = 220f

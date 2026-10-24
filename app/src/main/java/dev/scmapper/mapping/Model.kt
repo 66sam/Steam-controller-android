@@ -284,8 +284,8 @@ class Profile(
     var leftPad: SurfaceConfig = SurfaceConfig(),
     var rightPad: SurfaceConfig = SurfaceConfig(),
     var gyro: GyroConfig = GyroConfig(),
-    /** 0..100, scales every haptic effect. */
-    var hapticStrength: Int = 60,
+    /** 0..200 (%), scales every haptic effect. */
+    var hapticStrength: Int = 100,
     /** Forward game rumble to the trackpad actuators. */
     var rumble: Boolean = true,
     var ledBrightness: Int = 50,
@@ -337,7 +337,7 @@ class Profile(
             p.leftPad = SurfaceConfig.fromJson(o.optJSONObject("leftPad"))
             p.rightPad = SurfaceConfig.fromJson(o.optJSONObject("rightPad"))
             p.gyro = GyroConfig.fromJson(o.optJSONObject("gyro"))
-            p.hapticStrength = o.optInt("haptics", 60).coerceIn(0, 100)
+            p.hapticStrength = o.optInt("haptics", 100).coerceIn(0, 200)
             p.rumble = o.optBoolean("rumble", true)
             p.ledBrightness = o.optInt("led", 50).coerceIn(0, 100)
             return p

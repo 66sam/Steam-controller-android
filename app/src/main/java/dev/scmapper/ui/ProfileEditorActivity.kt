@@ -106,7 +106,7 @@ class ProfileEditorActivity : Activity() {
         gyro(profile.gyro)
 
         f.header("Feedback")
-        f.slider("Haptic strength", 0f, 100f, 5f, profile.hapticStrength.toFloat(), { "${it.toInt()}%" }) {
+        f.slider("Haptic strength", 0f, 200f, 5f, profile.hapticStrength.toFloat(), { "${it.toInt()}%" }) {
             profile.hapticStrength = it.toInt(); save()
         }
         f.check("Game rumble on the trackpads (needs the Xbox Wireless virtual controller type)", profile.rumble) {
