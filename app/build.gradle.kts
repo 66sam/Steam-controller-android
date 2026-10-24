@@ -11,15 +11,28 @@ android {
         applicationId = "dev.scmapper"
         minSdk = 26
         targetSdk = 34
-        versionCode = 3
-        versionName = "0.2.1"
+        versionCode = 4
+        versionName = "0.2.2"
+    }
+
+    // A fixed key kept in the repo, so every build (local or CI) can be installed as an update
+    // over the previous one. This is a sideloaded hobby app, not a Play Store release key.
+    signingConfigs {
+        create("shared") {
+            storeFile = file("scmapper.keystore")
+            storePassword = "scmapper"
+            keyAlias = "scmapper"
+            keyPassword = "scmapper"
+        }
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("shared")
+        }
         release {
             isMinifyEnabled = false
-            // Signed with the debug key so the release APK is installable out of the box.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("shared")
         }
     }
 
